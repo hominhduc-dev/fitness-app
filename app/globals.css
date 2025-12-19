@@ -1,0 +1,147 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Sporty Fitness App Dark Theme */
+:root {
+  /* Primary - Neon Sport Green */
+  --primary: #22c55e;
+  --primary-hover: #16a34a;
+  --primary-pressed: #15803d;
+  --primary-foreground: #0b0f14;
+
+  /* Secondary - Electric Blue */
+  --secondary: #2563eb;
+  --secondary-hover: #1d4ed8;
+  --secondary-foreground: #f9fafb;
+
+  /* Accent - Sport Red */
+  --accent: #f43f5e;
+  --accent-foreground: #f9fafb;
+
+  /* Backgrounds */
+  --background: #0b0f14;
+  --foreground: #f9fafb;
+
+  /* Surface & Cards */
+  --card: #1f2937;
+  --card-foreground: #f9fafb;
+  --surface: #111827;
+
+  /* Popover */
+  --popover: #1f2937;
+  --popover-foreground: #f9fafb;
+
+  /* Muted */
+  --muted: #374151;
+  --muted-foreground: #9ca3af;
+
+  /* Text */
+  --text-primary: #f9fafb;
+  --text-secondary: #d1d5db;
+
+  /* Status Colors */
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --info: #38bdf8;
+  --destructive: #f43f5e;
+  --destructive-foreground: #f9fafb;
+
+  /* Border & Input */
+  --border: #374151;
+  --input: #374151;
+  --ring: #22c55e;
+
+  /* Chart Colors */
+  --chart-1: #22c55e;
+  --chart-2: #2563eb;
+  --chart-3: #f43f5e;
+  --chart-4: #fbbf24;
+  --chart-5: #38bdf8;
+
+  --radius: 0.75rem;
+
+  /* Sidebar */
+  --sidebar: #111827;
+  --sidebar-foreground: #f9fafb;
+  --sidebar-primary: #22c55e;
+  --sidebar-primary-foreground: #0b0f14;
+  --sidebar-accent: #1f2937;
+  --sidebar-accent-foreground: #f9fafb;
+  --sidebar-border: #374151;
+  --sidebar-ring: #22c55e;
+}
+
+@theme inline {
+  --font-sans: "Inter", "Inter Fallback", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-surface: var(--surface);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111827;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}

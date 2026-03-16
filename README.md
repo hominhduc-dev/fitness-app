@@ -28,3 +28,20 @@ Continue building your app on:
 2. Deploy your chats from the v0 interface
 3. Changes are automatically pushed to this repository
 4. Vercel deploys the latest version from this repository
+
+## Local Architecture
+
+- `app/`, `components/`, `lib/`: Next.js frontend
+- `backend/`: standalone Express + TypeScript backend
+
+### Run frontend
+
+```bash
+npm run dev
+```
+
+### Run backend
+
+```bash
+npm run dev:backend
+```

@@ -2,82 +2,160 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { startTransition, useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Mail, Lock, User, ArrowRight, Loader2, X, AlertCircle, CheckCircle } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerClose,
-} from "@/components/ui/drawer"
+import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { mockCredentials } from "@/lib/mock-data"
-import { useRouter } from "next/navigation"
+import {
+  ApiError,
+  forgotPasswordRequest,
+  loginRequest,
+  registerRequest,
+} from "@/lib/auth/api"
+import { createBrowserSupabaseClient } from "@/lib/supabase/client"
+import { getAppBaseUrl } from "@/lib/supabase/config"
 
 interface AuthModalProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
   defaultTab?: "login" | "register"
+  onOpenChange: (open: boolean) => void
+  open: boolean
+  redirectToPath?: string | null
 }
 
-export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModalProps) {
+const REMEMBERED_EMAIL_KEY = "yeahbuddy:remembered-email"
+const supabase = createBrowserSupabaseClient()
+
+function sanitizeRedirectPath(path?: string | null) {
+  if (!path || !path.startsWith("/")) {
+    return null
+  }
+
+  return path
+}
+
+function getRoleLandingPath(role?: string | null) {
+  return role === "coach" ? "/coach" : "/dashboard"
+}
+
+function createCallbackRedirect(nextPath?: string | null) {
+  const redirectUrl = new URL("/auth/callback", getAppBaseUrl())
+  const sanitizedPath = sanitizeRedirectPath(nextPath)
+
+  if (sanitizedPath) {
+    redirectUrl.searchParams.set("next", sanitizedPath)
+  }
+
+  return redirectUrl.toString()
+}
+
+export function AuthModal({ open, onOpenChange, defaultTab = "login", redirectToPath }: AuthModalProps) {
   const [activeTab, setActiveTab] = useState<"login" | "register">(defaultTab)
-  const [showPassword, setShowPassword] = useState(false)
+  const [showLoginPassword, setShowLoginPassword] = useState(false)
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const isMobile = useIsMobile()
-  const router = useRouter()
-
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState<"google" | "apple" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-
   const [loginEmail, setLoginEmail] = useState("")
   const [loginPassword, setLoginPassword] = useState("")
   const [rememberMe, setRememberMe] = useState(false)
-
   const [registerName, setRegisterName] = useState("")
   const [registerEmail, setRegisterEmail] = useState("")
   const [registerPassword, setRegisterPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [acceptTerms, setAcceptTerms] = useState(false)
+  const isMobile = useIsMobile()
+  const router = useRouter()
+  const finalRedirectPath = sanitizeRedirectPath(redirectToPath)
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
+  useEffect(() => {
+    setActiveTab(defaultTab)
+    setError(null)
+    setSuccess(null)
+  }, [defaultTab])
+
+  useEffect(() => {
+    const rememberedEmail = window.localStorage.getItem(REMEMBERED_EMAIL_KEY)
+
+    if (!rememberedEmail) {
+      return
+    }
+
+    startTransition(() => {
+      setLoginEmail(rememberedEmail)
+      setRememberMe(true)
+    })
+  }, [])
+
+  async function applyBrowserSession(session?: {
+    accessToken: string
+    refreshToken: string
+  } | null) {
+    if (!session) {
+      return
+    }
+
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token: session.accessToken,
+      refresh_token: session.refreshToken,
+    })
+
+    if (sessionError) {
+      throw sessionError
+    }
+  }
+
+  async function finalizeAuthentication(role?: string | null, session?: { accessToken: string; refreshToken: string } | null) {
+    await applyBrowserSession(session)
+
+    if (rememberMe) {
+      window.localStorage.setItem(REMEMBERED_EMAIL_KEY, loginEmail.trim())
+    } else {
+      window.localStorage.removeItem(REMEMBERED_EMAIL_KEY)
+    }
+
+    onOpenChange(false)
+    router.push(finalRedirectPath ?? getRoleLandingPath(role))
+    router.refresh()
+  }
+
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault()
     setError(null)
     setSuccess(null)
     setIsLoading(true)
 
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      const response = await loginRequest({
+        email: loginEmail,
+        password: loginPassword,
+      })
 
-    const credential = mockCredentials.find((cred) => cred.email === loginEmail && cred.password === loginPassword)
-
-    if (credential) {
-      setSuccess("Đăng nhập thành công!")
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      setIsLoading(false)
-      onOpenChange(false)
-
-      if (credential.userId === "2") {
-        router.push("/coach")
-      } else {
-        router.push("/dashboard")
+      if (!response.session) {
+        throw new Error("Backend không trả về session đăng nhập.")
       }
-    } else {
-      setError("Email hoặc mật khẩu không đúng. Vui lòng thử lại.")
+
+      setSuccess("Đăng nhập thành công.")
+      await finalizeAuthentication(response.profile?.role, response.session)
+    } catch (rawError) {
+      const message = rawError instanceof ApiError || rawError instanceof Error ? rawError.message : "Không thể đăng nhập."
+      setError(message)
+    } finally {
       setIsLoading(false)
     }
   }
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleRegister = async (event: React.FormEvent) => {
+    event.preventDefault()
     setError(null)
     setSuccess(null)
 
@@ -91,21 +169,80 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
       return
     }
 
-    const existingUser = mockCredentials.find((cred) => cred.email === registerEmail)
-    if (existingUser) {
-      setError("Email này đã được sử dụng.")
+    setIsLoading(true)
+
+    try {
+      const response = await registerRequest({
+        email: registerEmail,
+        name: registerName,
+        password: registerPassword,
+        redirectTo: createCallbackRedirect(finalRedirectPath),
+        role: "trainee",
+      })
+
+      if (response.requiresEmailConfirmation || !response.session) {
+        setSuccess(response.message ?? "Tài khoản đã được tạo. Vui lòng xác nhận email để tiếp tục.")
+        setActiveTab("login")
+        setLoginEmail(registerEmail.trim())
+        setLoginPassword("")
+        return
+      }
+
+      setSuccess("Tạo tài khoản thành công.")
+      await finalizeAuthentication(response.profile?.role, response.session)
+    } catch (rawError) {
+      const message = rawError instanceof ApiError || rawError instanceof Error ? rawError.message : "Không thể đăng ký."
+      setError(message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleForgotPassword = async () => {
+    setError(null)
+    setSuccess(null)
+
+    const targetEmail = loginEmail.trim()
+
+    if (!targetEmail) {
+      setError("Nhập email trước khi yêu cầu đặt lại mật khẩu.")
       return
     }
 
     setIsLoading(true)
-    await new Promise((resolve) => setTimeout(resolve, 1500))
 
-    setSuccess("Đăng ký thành công! Đang chuyển hướng...")
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      const response = await forgotPasswordRequest({
+        email: targetEmail,
+        redirectTo: createCallbackRedirect("/reset-password"),
+      })
 
-    setIsLoading(false)
-    onOpenChange(false)
-    router.push("/dashboard")
+      setSuccess(response.message ?? "Email đặt lại mật khẩu đã được gửi.")
+    } catch (rawError) {
+      const message =
+        rawError instanceof ApiError || rawError instanceof Error ? rawError.message : "Không thể gửi email đặt lại mật khẩu."
+      setError(message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleOAuthLogin = async (provider: "google" | "apple") => {
+    setError(null)
+    setSuccess(null)
+    setOauthLoadingProvider(provider)
+
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      options: {
+        redirectTo: createCallbackRedirect(finalRedirectPath),
+      },
+      provider,
+    })
+
+    if (oauthError) {
+      setError(oauthError.message)
+      setOauthLoadingProvider(null)
+    }
   }
 
   const handleTabChange = (value: string) => {
@@ -114,29 +251,30 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
     setSuccess(null)
   }
 
-  const AuthContent = () => (
-    <>
-      <div className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20">
-        <p className="text-xs text-primary font-medium mb-1">Tài khoản test:</p>
-        <p className="text-xs text-muted-foreground">
-          Trainee: <span className="text-foreground font-mono">alex@example.com</span> /{" "}
-          <span className="text-foreground font-mono">123456</span>
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Coach: <span className="text-foreground font-mono">mike@example.com</span> /{" "}
-          <span className="text-foreground font-mono">123456</span>
-        </p>
-      </div>
+  const renderOAuthButton = (provider: "google" | "apple", label: string, icon: React.ReactNode) => (
+    <Button
+      variant="outline"
+      type="button"
+      onClick={() => void handleOAuthLogin(provider)}
+      disabled={isLoading || oauthLoadingProvider !== null}
+      className="bg-card border-border hover:bg-card/80 h-11 sm:h-10 text-sm"
+    >
+      {oauthLoadingProvider === provider ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : icon}
+      {label}
+    </Button>
+  )
 
+  const renderAuthContent = () => (
+    <>
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-destructive/10 border border-destructive/20 flex items-center gap-2">
-          <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/10 p-3">
+          <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
           <p className="text-sm text-destructive">{error}</p>
         </div>
       )}
       {success && (
-        <div className="mb-4 p-3 rounded-lg bg-primary/10 border border-primary/20 flex items-center gap-2">
-          <CheckCircle className="h-4 w-4 text-primary shrink-0" />
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/10 p-3">
+          <CheckCircle className="h-4 w-4 shrink-0 text-primary" />
           <p className="text-sm text-primary">{success}</p>
         </div>
       )}
@@ -170,7 +308,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
                   type="email"
                   placeholder="email@example.com"
                   value={loginEmail}
-                  onChange={(e) => setLoginEmail(e.target.value)}
+                  onChange={(event) => setLoginEmail(event.target.value)}
                   className="pl-10 bg-card border-border focus:border-primary h-11 sm:h-10 text-base sm:text-sm"
                   required
                 />
@@ -185,35 +323,35 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="login-password"
-                  type={showPassword ? "text" : "password"}
+                  type={showLoginPassword ? "text" : "password"}
                   placeholder="••••••••"
                   value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
+                  onChange={(event) => setLoginPassword(event.target.value)}
                   className="pl-10 pr-10 bg-card border-border focus:border-primary h-11 sm:h-10 text-base sm:text-sm"
                   required
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() => setShowLoginPassword((current) => !current)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="remember"
-                  checked={rememberMe}
-                  onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-                />
+                <Checkbox id="remember" checked={rememberMe} onCheckedChange={(checked) => setRememberMe(Boolean(checked))} />
                 <Label htmlFor="remember" className="text-xs sm:text-sm font-normal cursor-pointer">
-                  Ghi nhớ đăng nhập
+                  Ghi nhớ email
                 </Label>
               </div>
-              <button type="button" className="text-xs sm:text-sm text-primary hover:text-primary/80 transition-colors">
+              <button
+                type="button"
+                onClick={() => void handleForgotPassword()}
+                className="text-xs sm:text-sm text-primary hover:text-primary/80 transition-colors"
+              >
                 Quên mật khẩu?
               </button>
             </div>
@@ -221,7 +359,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
             <Button
               type="submit"
               className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 sm:h-11 text-base sm:text-sm"
-              disabled={isLoading}
+              disabled={isLoading || oauthLoadingProvider !== null}
             >
               {isLoading ? (
                 <>
@@ -246,22 +384,8 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
             </div>
 
             <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              <Button
-                variant="outline"
-                type="button"
-                className="bg-card border-border hover:bg-card/80 h-11 sm:h-10 text-sm"
-              >
-                <GoogleIcon className="mr-2 h-4 w-4" />
-                Google
-              </Button>
-              <Button
-                variant="outline"
-                type="button"
-                className="bg-card border-border hover:bg-card/80 h-11 sm:h-10 text-sm"
-              >
-                <AppleIcon className="mr-2 h-4 w-4" />
-                Apple
-              </Button>
+              {renderOAuthButton("google", "Google", <GoogleIcon className="mr-2 h-4 w-4" />)}
+              {renderOAuthButton("apple", "Apple", <AppleIcon className="mr-2 h-4 w-4" />)}
             </div>
           </form>
         </TabsContent>
@@ -279,7 +403,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
                   type="text"
                   placeholder="Nguyễn Văn A"
                   value={registerName}
-                  onChange={(e) => setRegisterName(e.target.value)}
+                  onChange={(event) => setRegisterName(event.target.value)}
                   className="pl-10 bg-card border-border focus:border-primary h-11 sm:h-10 text-base sm:text-sm"
                   required
                 />
@@ -297,7 +421,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
                   type="email"
                   placeholder="email@example.com"
                   value={registerEmail}
-                  onChange={(e) => setRegisterEmail(e.target.value)}
+                  onChange={(event) => setRegisterEmail(event.target.value)}
                   className="pl-10 bg-card border-border focus:border-primary h-11 sm:h-10 text-base sm:text-sm"
                   required
                 />
@@ -312,19 +436,19 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="register-password"
-                  type={showPassword ? "text" : "password"}
+                  type={showRegisterPassword ? "text" : "password"}
                   placeholder="••••••••"
                   value={registerPassword}
-                  onChange={(e) => setRegisterPassword(e.target.value)}
+                  onChange={(event) => setRegisterPassword(event.target.value)}
                   className="pl-10 pr-10 bg-card border-border focus:border-primary h-11 sm:h-10 text-base sm:text-sm"
                   required
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
+                  onClick={() => setShowRegisterPassword((current) => !current)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showRegisterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
@@ -340,13 +464,13 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
                   type={showConfirmPassword ? "text" : "password"}
                   placeholder="••••••••"
                   value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
                   className="pl-10 pr-10 bg-card border-border focus:border-primary h-11 sm:h-10 text-base sm:text-sm"
                   required
                 />
                 <button
                   type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  onClick={() => setShowConfirmPassword((current) => !current)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-1"
                 >
                   {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -358,7 +482,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
               <Checkbox
                 id="terms"
                 checked={acceptTerms}
-                onCheckedChange={(checked) => setAcceptTerms(checked as boolean)}
+                onCheckedChange={(checked) => setAcceptTerms(Boolean(checked))}
                 className="mt-0.5"
               />
               <Label htmlFor="terms" className="text-xs sm:text-sm font-normal cursor-pointer leading-relaxed">
@@ -376,7 +500,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
             <Button
               type="submit"
               className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold h-12 sm:h-11 text-base sm:text-sm"
-              disabled={isLoading || !acceptTerms}
+              disabled={isLoading || oauthLoadingProvider !== null || !acceptTerms}
             >
               {isLoading ? (
                 <>
@@ -401,22 +525,8 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
             </div>
 
             <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              <Button
-                variant="outline"
-                type="button"
-                className="bg-card border-border hover:bg-card/80 h-11 sm:h-10 text-sm"
-              >
-                <GoogleIcon className="mr-2 h-4 w-4" />
-                Google
-              </Button>
-              <Button
-                variant="outline"
-                type="button"
-                className="bg-card border-border hover:bg-card/80 h-11 sm:h-10 text-sm"
-              >
-                <AppleIcon className="mr-2 h-4 w-4" />
-                Apple
-              </Button>
+              {renderOAuthButton("google", "Google", <GoogleIcon className="mr-2 h-4 w-4" />)}
+              {renderOAuthButton("apple", "Apple", <AppleIcon className="mr-2 h-4 w-4" />)}
             </div>
           </form>
         </TabsContent>
@@ -456,9 +566,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
               </DrawerHeader>
             </div>
 
-            <div className="px-4 pb-8 pt-2 overflow-y-auto flex-1">
-              <AuthContent />
-            </div>
+            <div className="px-4 pb-8 pt-2 overflow-y-auto flex-1">{renderAuthContent()}</div>
           </div>
         </DrawerContent>
       </Drawer>
@@ -488,9 +596,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login" }: AuthModa
           </DialogHeader>
         </div>
 
-        <div className="px-6 pb-6">
-          <AuthContent />
-        </div>
+        <div className="px-6 pb-6">{renderAuthContent()}</div>
       </DialogContent>
     </Dialog>
   )

@@ -3,6 +3,8 @@
 import type React from "react"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { useState } from "react"
 import { Bell, Settings, Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -14,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { currentUser } from "@/lib/mock-data"
+import { useAuth } from "@/components/providers/auth-provider"
 
 interface HeaderProps {
   showMenu?: boolean
@@ -22,6 +24,31 @@ interface HeaderProps {
 }
 
 export function Header({ showMenu, onMenuClick }: HeaderProps) {
+  const router = useRouter()
+  const { isLoading, profile, signOut } = useAuth()
+  const [isSigningOut, setIsSigningOut] = useState(false)
+  const dashboardHref = profile?.role === "coach" ? "/coach" : "/dashboard"
+  const displayName = profile?.name ?? "YeahBuddy User"
+  const displayEmail = profile?.email ?? "Loading..."
+  const initials = displayName
+    .split(" ")
+    .filter(Boolean)
+    .map((segment) => segment[0])
+    .join("")
+    .slice(0, 2)
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true)
+
+    try {
+      await signOut()
+      router.push("/")
+      router.refresh()
+    } finally {
+      setIsSigningOut(false)
+    }
+  }
+
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-surface/95 backdrop-blur-lg">
       <div className="flex h-16 items-center justify-between px-4 md:px-6">
@@ -31,7 +58,7 @@ export function Header({ showMenu, onMenuClick }: HeaderProps) {
               <Menu className="h-5 w-5" />
             </Button>
           )}
-          <Link href="/dashboard" className="flex items-center gap-2">
+          <Link href={dashboardHref} className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
               <Dumbbell className="h-5 w-5 text-primary-foreground" />
             </div>
@@ -47,23 +74,18 @@ export function Header({ showMenu, onMenuClick }: HeaderProps) {
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+              <Button variant="ghost" className="relative h-9 w-9 rounded-full" disabled={isLoading}>
                 <Avatar className="h-9 w-9 border-2 border-primary/20">
-                  <AvatarImage src={currentUser.avatar || "/placeholder.svg"} alt={currentUser.name} />
-                  <AvatarFallback className="bg-primary/10 text-primary">
-                    {currentUser.name
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
-                  </AvatarFallback>
+                  <AvatarImage src={profile?.avatar || "/placeholder.svg"} alt={displayName} />
+                  <AvatarFallback className="bg-primary/10 text-primary">{initials || "YB"}</AvatarFallback>
                 </Avatar>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuLabel>
                 <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium">{currentUser.name}</p>
-                  <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+                  <p className="text-sm font-medium">{displayName}</p>
+                  <p className="text-xs text-muted-foreground">{displayEmail}</p>
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
@@ -73,12 +95,14 @@ export function Header({ showMenu, onMenuClick }: HeaderProps) {
                   Settings
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/coach/find">Add Coach</Link>
-              </DropdownMenuItem>
+              {profile?.role !== "coach" && (
+                <DropdownMenuItem asChild>
+                  <Link href="/coach/find">Add Coach</Link>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/">Sign Out</Link>
+              <DropdownMenuItem onClick={() => void handleSignOut()} disabled={isSigningOut}>
+                {isSigningOut ? "Signing Out..." : "Sign Out"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

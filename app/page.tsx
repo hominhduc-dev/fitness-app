@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { AuthModal } from "@/components/auth/auth-modal"
 import { ArrowRight, Dumbbell, Users, Apple } from "lucide-react"
@@ -10,6 +10,20 @@ import { ArrowRight, Dumbbell, Users, Apple } from "lucide-react"
 export default function Home() {
   const [authOpen, setAuthOpen] = useState(false)
   const [authTab, setAuthTab] = useState<"login" | "register">("login")
+  const [redirectToPath, setRedirectToPath] = useState<string | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const authQuery = params.get("auth")
+
+    if (!authQuery) {
+      return
+    }
+
+    setRedirectToPath(params.get("next"))
+    setAuthTab(authQuery === "register" ? "register" : "login")
+    setAuthOpen(true)
+  }, [])
 
   const openLogin = () => {
     setAuthTab("login")
@@ -163,7 +177,7 @@ export default function Home() {
       </div>
 
       {/* Auth Modal */}
-      <AuthModal open={authOpen} onOpenChange={setAuthOpen} defaultTab={authTab} />
+      <AuthModal open={authOpen} onOpenChange={setAuthOpen} defaultTab={authTab} redirectToPath={redirectToPath} />
     </div>
   )
 }

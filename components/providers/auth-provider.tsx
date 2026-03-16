@@ -1,0 +1,161 @@
+"use client"
+
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js"
+
+import { createContext, startTransition, useContext, useEffect, useState } from "react"
+
+import { fetchCurrentProfile, logoutRequest, updateProfileRequest } from "@/lib/auth/api"
+import type { AppProfile, UpdateProfileInput } from "@/lib/auth/types"
+import { createBrowserSupabaseClient } from "@/lib/supabase/client"
+
+type AuthContextValue = {
+  isLoading: boolean
+  profile: AppProfile | null
+  refreshProfile: () => Promise<AppProfile | null>
+  session: Session | null
+  signOut: () => Promise<void>
+  updateProfile: (input: UpdateProfileInput) => Promise<AppProfile | null>
+}
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined)
+const supabase = createBrowserSupabaseClient()
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [session, setSession] = useState<Session | null>(null)
+  const [profile, setProfile] = useState<AppProfile | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  async function syncProfile(nextSession: Session | null) {
+    if (!nextSession?.access_token) {
+      startTransition(() => {
+        setSession(null)
+        setProfile(null)
+        setIsLoading(false)
+      })
+
+      return null
+    }
+
+    try {
+      const nextProfile = await fetchCurrentProfile(nextSession.access_token)
+
+      startTransition(() => {
+        setSession(nextSession)
+        setProfile(nextProfile)
+        setIsLoading(false)
+      })
+
+      return nextProfile
+    } catch {
+      startTransition(() => {
+        setSession(nextSession)
+        setProfile(null)
+        setIsLoading(false)
+      })
+
+      return null
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    const bootstrap = async () => {
+      const {
+        data: { session: initialSession },
+      } = await supabase.auth.getSession()
+
+      if (cancelled) {
+        return
+      }
+
+      await syncProfile(initialSession)
+    }
+
+    void bootstrap()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, nextSession: Session | null) => {
+      if (cancelled) {
+        return
+      }
+
+      void syncProfile(nextSession)
+    })
+
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  async function refreshProfile() {
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession()
+
+    return syncProfile(currentSession)
+  }
+
+  async function updateProfile(input: UpdateProfileInput) {
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession()
+
+    if (!currentSession?.access_token) {
+      throw new Error("Bạn chưa đăng nhập.")
+    }
+
+    const response = await updateProfileRequest(currentSession.access_token, input)
+
+    startTransition(() => {
+      setProfile(response.profile)
+    })
+
+    return response.profile
+  }
+
+  async function signOut() {
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession()
+
+    if (currentSession?.access_token) {
+      await logoutRequest(currentSession.access_token).catch(() => null)
+    }
+
+    await supabase.auth.signOut()
+
+    startTransition(() => {
+      setSession(null)
+      setProfile(null)
+      setIsLoading(false)
+    })
+  }
+
+  return (
+    <AuthContext.Provider
+      value={{
+        isLoading,
+        profile,
+        refreshProfile,
+        session,
+        signOut,
+        updateProfile,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext)
+
+  if (!context) {
+    throw new Error("useAuth must be used within AuthProvider")
+  }
+
+  return context
+}

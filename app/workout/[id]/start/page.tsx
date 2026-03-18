@@ -73,7 +73,12 @@ export default function WorkoutStartPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-4 py-6 pb-32">
+      {/* Rest timer - mobile only, sticky under header */}
+      <div className="lg:hidden">
+        <RestTimer defaultTime={exercises[currentExerciseIndex]?.restTime || 90} />
+      </div>
+
+      <main className="mx-auto max-w-2xl px-4 py-6 pb-24">
         <div className="grid gap-4 lg:grid-cols-3">
           {/* Exercises list */}
           <div className="lg:col-span-2 space-y-4">
@@ -88,7 +93,7 @@ export default function WorkoutStartPage() {
             ))}
           </div>
 
-          {/* Rest timer - sidebar on desktop, fixed on mobile */}
+          {/* Rest timer - sidebar on desktop */}
           <div className="hidden lg:block">
             <div className="sticky top-24">
               <RestTimer defaultTime={exercises[currentExerciseIndex]?.restTime || 90} />
@@ -98,16 +103,11 @@ export default function WorkoutStartPage() {
       </main>
 
       {/* Fixed bottom bar */}
-      <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-surface/95 backdrop-blur-lg p-4">
-        <div className="mx-auto max-w-2xl flex items-center gap-4">
-          {/* Mobile rest timer trigger */}
-          <div className="lg:hidden flex-1">
-            <RestTimer defaultTime={exercises[currentExerciseIndex]?.restTime || 90} />
-          </div>
-
+      <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-surface/95 backdrop-blur-lg p-4 md:p-6">
+        <div className="mx-auto max-w-2xl">
           <Button
             size="lg"
-            className="flex-1 bg-success hover:bg-success/90 text-white font-semibold gap-2"
+            className="w-full bg-success hover:bg-success/90 text-white font-semibold gap-2 h-12"
             onClick={handleFinishWorkout}
             disabled={completedSets === 0}
           >

@@ -8,14 +8,13 @@ import { useAuth } from "@/components/providers/auth-provider"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { ExerciseCard } from "@/components/workout/exercise-card"
-import { RestTimer } from "@/components/workout/rest-timer"
 import { createWorkoutLog, fetchWorkoutDetail } from "@/lib/fitness/api"
 import type { ExerciseSet, Workout } from "@/lib/types"
 
 export default function WorkoutStartPage() {
   const params = useParams()
   const router = useRouter()
-  const { isLoading: authLoading, session } = useAuth()
+  const { isLoading: authLoading, profile, session } = useAuth()
   const [workout, setWorkout] = useState<Workout | null>(null)
   const [exercises, setExercises] = useState<Workout["exercises"]>([])
   const [startTime, setStartTime] = useState(new Date())
@@ -25,6 +24,7 @@ export default function WorkoutStartPage() {
   const [error, setError] = useState<string | null>(null)
 
   const workoutId = Array.isArray(params.id) ? params.id[0] : params.id
+  const weightUnit = profile?.preferredWeightUnit === "lbs" ? "lbs" : "kg"
 
   useEffect(() => {
     if (!session?.access_token || !workoutId) {
@@ -167,33 +167,22 @@ export default function WorkoutStartPage() {
       </header>
 
       <main className="mx-auto max-w-2xl px-4 py-6 pb-32">
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="lg:col-span-2 space-y-4">
-            {exercises.map((exercise, index) => (
-              <ExerciseCard
-                key={exercise.id}
-                exercise={exercise}
-                exerciseIndex={index}
-                isActive={index === currentExerciseIndex}
-                onSetComplete={(setId, data) => handleSetComplete(exercise.id, setId, data)}
-              />
-            ))}
-          </div>
-
-          <div className="hidden lg:block">
-            <div className="sticky top-24">
-              <RestTimer defaultTime={exercises[currentExerciseIndex]?.restTime || 90} />
-            </div>
-          </div>
+        <div className="space-y-4">
+          {exercises.map((exercise, index) => (
+            <ExerciseCard
+              key={exercise.id}
+              exercise={exercise}
+              exerciseIndex={index}
+              isActive={index === currentExerciseIndex}
+              weightUnit={weightUnit}
+              onSetComplete={(setId, data) => handleSetComplete(exercise.id, setId, data)}
+            />
+          ))}
         </div>
       </main>
 
       <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-surface/95 backdrop-blur-lg p-4">
-        <div className="mx-auto max-w-2xl flex items-center gap-4">
-          <div className="lg:hidden flex-1">
-            <RestTimer defaultTime={exercises[currentExerciseIndex]?.restTime || 90} />
-          </div>
-
+        <div className="mx-auto flex max-w-2xl items-center">
           <Button
             size="lg"
             className="flex-1 bg-success hover:bg-success/90 text-white font-semibold gap-2"

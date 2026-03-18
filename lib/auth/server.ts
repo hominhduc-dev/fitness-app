@@ -12,12 +12,20 @@ type ServerAuthState = {
 
 async function getServerAuthState(): Promise<ServerAuthState> {
   const supabase = await createServerSupabaseClient()
-  const [{ data: userResult }, { data: sessionResult }] = await Promise.all([
-    supabase.auth.getUser(),
-    supabase.auth.getSession(),
-  ])
+  const { data: userResult } = await supabase.auth.getUser()
 
-  if (!userResult.user || !sessionResult.session?.access_token) {
+  if (!userResult.user) {
+    return {
+      accessToken: null,
+      profile: null,
+    }
+  }
+
+  const {
+    data: { session: sessionResult },
+  } = await supabase.auth.getSession()
+
+  if (!sessionResult?.access_token) {
     return {
       accessToken: null,
       profile: null,
@@ -25,15 +33,15 @@ async function getServerAuthState(): Promise<ServerAuthState> {
   }
 
   try {
-    const profile = await fetchCurrentProfile(sessionResult.session.access_token)
+    const profile = await fetchCurrentProfile(sessionResult.access_token)
 
     return {
-      accessToken: sessionResult.session.access_token,
+      accessToken: sessionResult.access_token,
       profile,
     }
   } catch {
     return {
-      accessToken: sessionResult.session.access_token,
+      accessToken: sessionResult.access_token,
       profile: null,
     }
   }

@@ -3,7 +3,10 @@ import { Router } from "express"
 
 import { requireCurrentProfile } from "../services/auth.service"
 import {
+  assignCoachProgramToTrainee,
+  createBodyMetricForTrainee,
   createCoachRequestForTrainee,
+  createCoachCheckInForTrainee,
   createCoachProgram,
   deleteCoachProgram,
   getCoachDashboard,
@@ -12,6 +15,7 @@ import {
   listAvailableCoachesForTrainee,
   listCoachPrograms,
   listCoachTrainees,
+  unassignCoachProgramFromTrainee,
   updateCoachProgram,
   updateCoachRequestStatus,
 } from "../services/fitness-data.service"
@@ -166,10 +170,43 @@ coachRouter.delete("/programs/:programId", async (req, res) => {
   }
 })
 
+coachRouter.post("/programs/:programId/assignments", async (req, res) => {
+  try {
+    const profile = await requireCurrentProfile(getAccessToken(req))
+    const result = await assignCoachProgramToTrainee(
+      profile.profile,
+      String(req.params.programId),
+      String(req.body.traineeId ?? ""),
+    )
+
+    res.status(201).json(result)
+  } catch (error) {
+    sendError(res, error)
+  }
+})
+
+coachRouter.delete("/programs/:programId/assignments/:traineeId", async (req, res) => {
+  try {
+    const profile = await requireCurrentProfile(getAccessToken(req))
+    const result = await unassignCoachProgramFromTrainee(
+      profile.profile,
+      String(req.params.programId),
+      String(req.params.traineeId),
+    )
+
+    res.json(result)
+  } catch (error) {
+    sendError(res, error)
+  }
+})
+
 coachRouter.get("/trainees", async (req, res) => {
   try {
     const profile = await requireCurrentProfile(getAccessToken(req))
-    const trainees = await listCoachTrainees(profile.profile)
+    const phoneQuery = typeof req.query.phone === "string" ? req.query.phone : undefined
+    const trainees = await listCoachTrainees(profile.profile, {
+      phone: phoneQuery,
+    })
 
     res.json({
       trainees,
@@ -185,6 +222,51 @@ coachRouter.get("/trainees/:traineeId", async (req, res) => {
     const result = await getCoachTraineeDetail(profile.profile, String(req.params.traineeId))
 
     res.json(result)
+  } catch (error) {
+    sendError(res, error)
+  }
+})
+
+coachRouter.post("/trainees/:traineeId/body-metrics", async (req, res) => {
+  try {
+    const profile = await requireCurrentProfile(getAccessToken(req))
+    const result = await createBodyMetricForTrainee(profile.profile, String(req.params.traineeId), {
+      armCm: req.body.armCm == null ? undefined : Number(req.body.armCm),
+      bodyFatPct: req.body.bodyFatPct == null ? undefined : Number(req.body.bodyFatPct),
+      chestCm: req.body.chestCm == null ? undefined : Number(req.body.chestCm),
+      hipsCm: req.body.hipsCm == null ? undefined : Number(req.body.hipsCm),
+      note: typeof req.body.note === "string" ? req.body.note : undefined,
+      recordedAt: typeof req.body.recordedAt === "string" ? req.body.recordedAt : undefined,
+      thighCm: req.body.thighCm == null ? undefined : Number(req.body.thighCm),
+      waistCm: req.body.waistCm == null ? undefined : Number(req.body.waistCm),
+      weightKg: req.body.weightKg == null ? undefined : Number(req.body.weightKg),
+    })
+
+    res.status(201).json({
+      bodyMetric: result,
+    })
+  } catch (error) {
+    sendError(res, error)
+  }
+})
+
+coachRouter.post("/trainees/:traineeId/check-ins", async (req, res) => {
+  try {
+    const profile = await requireCurrentProfile(getAccessToken(req))
+    const result = await createCoachCheckInForTrainee(profile.profile, String(req.params.traineeId), {
+      adherenceScore: req.body.adherenceScore == null ? undefined : Number(req.body.adherenceScore),
+      checkInDate: typeof req.body.checkInDate === "string" ? req.body.checkInDate : undefined,
+      energyScore: req.body.energyScore == null ? undefined : Number(req.body.energyScore),
+      feedback: String(req.body.feedback ?? ""),
+      moodScore: req.body.moodScore == null ? undefined : Number(req.body.moodScore),
+      nextFocus: typeof req.body.nextFocus === "string" ? req.body.nextFocus : undefined,
+      recoveryScore: req.body.recoveryScore == null ? undefined : Number(req.body.recoveryScore),
+      summary: typeof req.body.summary === "string" ? req.body.summary : undefined,
+    })
+
+    res.status(201).json({
+      checkIn: result,
+    })
   } catch (error) {
     sendError(res, error)
   }

@@ -4,11 +4,14 @@ export interface AppProfile {
   avatar?: string | null
   coachId?: string | null
   createdAt: string
+  dailyCalorieGoal: number
   email: string
   fitnessGoals: string[]
   id: string
+  isActive: boolean
   name: string
   phone?: string | null
+  preferredWeightUnit: "kg" | "lbs"
   role: AppRole
   supabaseAuthUserId?: string | null
   updatedAt: string
@@ -38,6 +41,9 @@ export interface AuthResponse {
 
 export interface UpdateProfileInput {
   avatar?: string | null
+  dailyCalorieGoal?: number | null
   fitnessGoals?: string[]
   name?: string | null
+  phone?: string | null
+  preferredWeightUnit?: "kg" | "lbs"
 }

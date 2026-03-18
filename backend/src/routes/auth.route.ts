@@ -83,10 +83,17 @@ authRouter.patch("/me", async (req, res) => {
   try {
     const result = await updateCurrentProfile(getAccessToken(req), {
       avatar: typeof req.body.avatar === "string" || req.body.avatar === null ? req.body.avatar : undefined,
+      dailyCalorieGoal:
+        req.body.dailyCalorieGoal == null ? req.body.dailyCalorieGoal : Number(req.body.dailyCalorieGoal),
       fitnessGoals: Array.isArray(req.body.fitnessGoals)
         ? req.body.fitnessGoals.map((goal: unknown) => String(goal))
         : undefined,
       name: typeof req.body.name === "string" || req.body.name === null ? req.body.name : undefined,
+      phone: typeof req.body.phone === "string" || req.body.phone === null ? req.body.phone : undefined,
+      preferredWeightUnit:
+        typeof req.body.preferredWeightUnit === "string" || req.body.preferredWeightUnit === null
+          ? req.body.preferredWeightUnit
+          : undefined,
     })
 
     res.json(result)

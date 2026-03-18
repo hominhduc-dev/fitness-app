@@ -17,8 +17,10 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus } from "lucide-react"
 import { useLocale } from "@/components/providers/locale-provider"
+import type { Meal } from "@/lib/types"
 
 interface AddMealDialogProps {
+  defaultType?: Meal["type"]
   description?: string
   initialMeal?: {
     calories: number
@@ -26,11 +28,11 @@ interface AddMealDialogProps {
     fat?: number
     name: string
     protein?: number
-    type: "breakfast" | "lunch" | "dinner" | "snack"
+    type: Meal["type"]
   }
   onAdd?: (meal: {
     name: string
-    type: "breakfast" | "lunch" | "dinner" | "snack"
+    type: Meal["type"]
     calories: number
     protein?: number
     carbs?: number
@@ -44,6 +46,7 @@ interface AddMealDialogProps {
 }
 
 export function AddMealDialog({
+  defaultType,
   description,
   initialMeal,
   onAdd,
@@ -56,7 +59,7 @@ export function AddMealDialog({
   const { messages } = useLocale()
   const [internalOpen, setInternalOpen] = useState(false)
   const [name, setName] = useState("")
-  const [type, setType] = useState<"breakfast" | "lunch" | "dinner" | "snack">("breakfast")
+  const [type, setType] = useState<Meal["type"]>("breakfast")
   const [calories, setCalories] = useState("")
   const [protein, setProtein] = useState("")
   const [carbs, setCarbs] = useState("")
@@ -66,7 +69,7 @@ export function AddMealDialog({
 
   const resetForm = () => {
     setName(initialMeal?.name ?? "")
-    setType(initialMeal?.type ?? "breakfast")
+    setType(initialMeal?.type ?? defaultType ?? "breakfast")
     setCalories(initialMeal?.calories?.toString() ?? "")
     setProtein(initialMeal?.protein?.toString() ?? "")
     setCarbs(initialMeal?.carbs?.toString() ?? "")
@@ -77,7 +80,7 @@ export function AddMealDialog({
     if (resolvedOpen) {
       resetForm()
     }
-  }, [initialMeal, resolvedOpen])
+  }, [defaultType, initialMeal, resolvedOpen])
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!isControlled) {
@@ -132,7 +135,7 @@ export function AddMealDialog({
 
           <div className="space-y-2">
             <Label htmlFor="type">{messages.meals.mealType}</Label>
-            <Select value={type} onValueChange={(v: typeof type) => setType(v)}>
+            <Select value={type} onValueChange={(v) => setType(v as Meal["type"])}>
               <SelectTrigger>
                 <SelectValue placeholder={messages.meals.mealTypePlaceholder} />
               </SelectTrigger>

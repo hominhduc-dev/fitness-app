@@ -27,7 +27,7 @@ export function LocaleToggle({ compact = false }: { compact?: boolean }) {
     <div
       className={cn(
         "inline-flex items-center gap-1 rounded-full border border-white/70 bg-white/85 p-1 shadow-sm backdrop-blur",
-        compact && "border-border bg-card/90",
+        compact && "gap-0.5 border-border bg-card/90 p-0.5",
       )}
       aria-label={messages.common.language}
     >
@@ -49,6 +49,7 @@ export function LocaleToggle({ compact = false }: { compact?: boolean }) {
             disabled={isPending}
             className={cn(
               "rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition-all",
+              compact && "px-2.5 py-1 text-[11px] tracking-[0.14em]",
               isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
             )}
           >

@@ -5,6 +5,7 @@ import type React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  Activity,
   Home,
   Calendar,
   Dumbbell,
@@ -50,6 +51,7 @@ export function Sidebar({ role = "trainee" }: SidebarProps) {
     { href: "/coach", icon: Home, label: messages.shell.dashboard },
     { href: "/coach/trainees", icon: Users, label: messages.shell.trainees },
     { href: "/coach/programs", icon: Dumbbell, label: messages.shell.programs },
+    { href: "/coach/exercises", icon: Activity, label: "Exercises" },
   ]
   const adminNavItems: NavItem[] = [{ href: "/admin", icon: ShieldCheck, label: messages.shell.adminDashboard }]
   const navItems = role === "coach" ? coachNavItems : role === "admin" ? adminNavItems : traineeNavItems

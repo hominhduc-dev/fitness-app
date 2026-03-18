@@ -10,13 +10,21 @@ import type { WorkoutExercise, ExerciseSet } from "@/lib/types"
 interface ExerciseCardProps {
   exercise: WorkoutExercise
   exerciseIndex: number
+  weightUnit?: "kg" | "lbs"
   onSetComplete?: (setId: string, data: Partial<ExerciseSet>) => void
   isActive?: boolean
 }
 
-export function ExerciseCard({ exercise, exerciseIndex, onSetComplete, isActive = false }: ExerciseCardProps) {
+export function ExerciseCard({
+  exercise,
+  exerciseIndex,
+  weightUnit = "kg",
+  onSetComplete,
+  isActive = false,
+}: ExerciseCardProps) {
   const [expanded, setExpanded] = useState(isActive)
   const completedSets = exercise.sets.filter((s) => s.completed).length
+  const weightUnitLabel = weightUnit === "lbs" ? "lbs" : "kg"
 
   return (
     <div
@@ -64,7 +72,7 @@ export function ExerciseCard({ exercise, exerciseIndex, onSetComplete, isActive 
           <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs font-medium text-muted-foreground bg-muted/30">
             <div className="col-span-1">SET</div>
             <div className="col-span-3">PREV</div>
-            <div className="col-span-3 text-center">WEIGHT</div>
+            <div className="col-span-3 text-center">WEIGHT ({weightUnitLabel.toUpperCase()})</div>
             <div className="col-span-2 text-center">REPS</div>
             <div className="col-span-2 text-center">RIR</div>
             <div className="col-span-1"></div>
@@ -72,7 +80,13 @@ export function ExerciseCard({ exercise, exerciseIndex, onSetComplete, isActive 
 
           {/* Sets */}
           {exercise.sets.map((set, setIdx) => (
-            <SetRow key={set.id} set={set} setIndex={setIdx} onComplete={(data) => onSetComplete?.(set.id, data)} />
+            <SetRow
+              key={set.id}
+              set={set}
+              setIndex={setIdx}
+              weightUnitLabel={weightUnitLabel}
+              onComplete={(data) => onSetComplete?.(set.id, data)}
+            />
           ))}
         </div>
       )}
@@ -83,10 +97,11 @@ export function ExerciseCard({ exercise, exerciseIndex, onSetComplete, isActive 
 interface SetRowProps {
   set: ExerciseSet
   setIndex: number
+  weightUnitLabel: string
   onComplete?: (data: Partial<ExerciseSet>) => void
 }
 
-function SetRow({ set, setIndex, onComplete }: SetRowProps) {
+function SetRow({ set, setIndex, weightUnitLabel, onComplete }: SetRowProps) {
   const [weight, setWeight] = useState(set.weight?.toString() || "")
   const [reps, setReps] = useState(set.actualReps?.toString() || set.targetReps.toString())
   const [rir, setRir] = useState(set.rir?.toString() || "2")
@@ -122,7 +137,7 @@ function SetRow({ set, setIndex, onComplete }: SetRowProps) {
       </div>
 
       <div className="col-span-3 text-sm text-muted-foreground">
-        {set.weight ? `${set.weight} × ${set.targetReps}` : `— × ${set.targetReps}`}
+        {set.weight ? `${set.weight} ${weightUnitLabel} × ${set.targetReps}` : `— × ${set.targetReps}`}
       </div>
 
       <div className="col-span-3">
@@ -130,7 +145,7 @@ function SetRow({ set, setIndex, onComplete }: SetRowProps) {
           type="number"
           value={weight}
           onChange={(e) => setWeight(e.target.value)}
-          placeholder="lbs"
+          placeholder={weightUnitLabel}
           className="h-9 text-center bg-background"
         />
       </div>

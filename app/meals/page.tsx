@@ -9,7 +9,7 @@ import { Header } from "@/components/layout/header"
 import { MobileNav } from "@/components/layout/mobile-nav"
 import { Sidebar } from "@/components/layout/sidebar"
 import { AddMealDialog } from "@/components/meals/add-meal-dialog"
-import { MealCard } from "@/components/meals/meal-card"
+import { MealTypeList } from "@/components/meals/meal-type-list"
 import { useAuth } from "@/components/providers/auth-provider"
 import { useLocale } from "@/components/providers/locale-provider"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ export default function MealsPage() {
   const [weeklyCalories, setWeeklyCalories] = useState<WeeklyCaloriesPoint[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [creatingMealType, setCreatingMealType] = useState<Meal["type"] | null>(null)
   const [editingMeal, setEditingMeal] = useState<Meal | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -158,6 +159,20 @@ export default function MealsPage() {
             </div>
 
             <AddMealDialog
+              defaultType={creatingMealType ?? undefined}
+              description={messages.meals.addMealDescription}
+              onAdd={handleAddMeal}
+              onOpenChange={(open) => {
+                if (!open) {
+                  setCreatingMealType(null)
+                }
+              }}
+              open={creatingMealType !== null}
+              title={messages.meals.addMealTitle}
+              trigger={null}
+            />
+
+            <AddMealDialog
               description={messages.meals.editMealDescription}
               initialMeal={editingMeal ?? undefined}
               onAdd={handleUpdateMeal}
@@ -244,22 +259,14 @@ export default function MealsPage() {
                     <div className="rounded-xl border border-border bg-card p-8 text-center text-muted-foreground">
                       {messages.meals.loadingMeals}
                     </div>
-                  ) : meals.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-border p-8 text-center">
-                      <p className="text-muted-foreground mb-4">{messages.meals.noMeals}</p>
-                      <AddMealDialog onAdd={handleAddMeal} />
-                    </div>
                   ) : (
-                    <div className="space-y-3">
-                      {meals.map((meal) => (
-                        <MealCard
-                          key={meal.id}
-                          meal={meal}
-                          onDelete={() => void handleDeleteMeal(meal.id)}
-                          onEdit={() => setEditingMeal(meal)}
-                        />
-                      ))}
-                    </div>
+                    <MealTypeList
+                      isSubmitting={isSubmitting}
+                      meals={meals}
+                      onAddMealType={setCreatingMealType}
+                      onDeleteMeal={(mealId) => void handleDeleteMeal(mealId)}
+                      onEditMeal={setEditingMeal}
+                    />
                   )}
                 </div>
               </div>

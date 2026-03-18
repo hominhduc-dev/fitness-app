@@ -3,6 +3,7 @@
 import { Header } from "@/components/layout/header"
 import { Sidebar } from "@/components/layout/sidebar"
 import { MobileNav } from "@/components/layout/mobile-nav"
+import { useAuth } from "@/components/providers/auth-provider"
 import { StatsCard } from "@/components/dashboard/stats-card"
 import { Flame, Target, TrendingUp, Calendar, Dumbbell } from "lucide-react"
 import { progressionData, muscleGroupDistribution, weeklyCaloriesData } from "@/lib/mock-data"
@@ -21,6 +22,9 @@ import {
 } from "recharts"
 
 export default function ProgressPage() {
+  const { profile } = useAuth()
+  const weightUnitLabel = profile?.preferredWeightUnit === "lbs" ? "lbs" : "kg"
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="trainee" />
@@ -49,7 +53,7 @@ export default function ProgressPage() {
               <StatsCard
                 title="Total Volume"
                 value="186k"
-                subtitle="lbs lifted this month"
+                subtitle={`${weightUnitLabel} lifted this month`}
                 icon={TrendingUp}
                 trend={{ value: 12, positive: true }}
               />
@@ -183,7 +187,7 @@ export default function ProgressPage() {
                         }}
                         labelStyle={{ color: "#F9FAFB" }}
                       />
-                      <Bar dataKey="calories" fill="#22C55E" radius={[4, 4, 0, 0]} name="Volume (lbs)" />
+                      <Bar dataKey="calories" fill="#22C55E" radius={[4, 4, 0, 0]} name={`Volume (${weightUnitLabel})`} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -214,7 +218,7 @@ export default function ProgressPage() {
                       </div>
                     </div>
                     <p className="text-2xl font-bold text-primary">
-                      {pr.weight} <span className="text-sm font-normal text-muted-foreground">lbs</span>
+                      {pr.weight} <span className="text-sm font-normal text-muted-foreground">{weightUnitLabel}</span>
                     </p>
                   </div>
                 ))}

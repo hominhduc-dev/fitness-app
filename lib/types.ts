@@ -9,6 +9,8 @@ export interface User {
   role: UserRole
   avatar?: string
   fitnessGoals?: string[]
+  preferredWeightUnit?: "kg" | "lbs"
+  dailyCalorieGoal?: number
   coachId?: string
   createdAt: Date
 }
@@ -41,6 +43,7 @@ export interface WorkoutExercise {
 
 export interface Workout {
   id: string
+  isPersonal?: boolean
   name: string
   exercises: WorkoutExercise[]
   scheduledDay?: number // 0-6 for days of week

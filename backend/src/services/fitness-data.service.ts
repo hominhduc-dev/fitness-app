@@ -1,5 +1,7 @@
 import {
+  type BodyMetricEntry,
   CoachRequestStatus,
+  type CoachCheckIn,
   ProgramDifficulty,
   UserRole,
   type Exercise,
@@ -25,6 +27,10 @@ type WorkoutRecord = Workout & {
   >
 }
 
+type WorkoutWithProgramRecord = WorkoutRecord & {
+  program: Program | null
+}
+
 type ProgramRecord = Program & {
   assignments: Array<
     ProgramAssignment & {
@@ -36,6 +42,40 @@ type ProgramRecord = Program & {
 
 type WorkoutLogRecord = WorkoutLog & {
   workout: WorkoutRecord | null
+}
+
+type BodyMetricRecord = BodyMetricEntry & {
+  coach: User | null
+}
+
+type CoachCheckInRecord = CoachCheckIn & {
+  coach: User
+}
+
+type PersonalWorkoutInput = {
+  duration?: number
+  exercises: Array<{
+    exerciseId: string
+    reps: number
+    restTime?: number
+    sets: number
+  }>
+  name: string
+  notes?: string | null
+  scheduledDay?: number
+}
+
+type NormalizedPersonalWorkoutInput = {
+  duration?: number
+  exercises: Array<{
+    exerciseId: string
+    reps: number
+    restTime?: number
+    sets: number
+  }>
+  name: string
+  notes?: string
+  scheduledDay?: number
 }
 
 const DEFAULT_CALORIE_TARGET = 2500
@@ -117,7 +157,7 @@ function serializeExerciseSet(set: ExerciseSet) {
   }
 }
 
-function serializeWorkout(workout: WorkoutRecord) {
+function serializeWorkout(workout: WorkoutRecord, options?: { isPersonal?: boolean }) {
   return {
     duration: workout.duration ?? undefined,
     exercises: workout.exercises
@@ -134,6 +174,7 @@ function serializeWorkout(workout: WorkoutRecord) {
           .map(serializeExerciseSet),
       })),
     id: workout.id,
+    isPersonal: options?.isPersonal ?? false,
     name: workout.name,
     notes: workout.notes ?? undefined,
     scheduledDay: workout.scheduledDay ?? undefined,
@@ -173,7 +214,7 @@ function serializeProgram(program: ProgramRecord) {
     workouts: program.workouts
       .slice()
       .sort((left, right) => (left.scheduledDay ?? 7) - (right.scheduledDay ?? 7))
-      .map(serializeWorkout),
+      .map((workout) => serializeWorkout(workout)),
     workoutsPerWeek: program.workoutsPerWeek,
   }
 }
@@ -199,6 +240,41 @@ function serializeCoachRequest(request: {
       name: request.trainee.name,
     },
     traineeId: request.traineeId,
+  }
+}
+
+function serializeBodyMetricEntry(entry: BodyMetricRecord) {
+  return {
+    armCm: entry.armCm ?? undefined,
+    bodyFatPct: entry.bodyFatPct ?? undefined,
+    chestCm: entry.chestCm ?? undefined,
+    coachId: entry.coachId ?? undefined,
+    coachName: entry.coach?.name ?? undefined,
+    createdAt: entry.createdAt,
+    hipsCm: entry.hipsCm ?? undefined,
+    id: entry.id,
+    note: entry.note ?? undefined,
+    recordedAt: entry.recordedAt,
+    thighCm: entry.thighCm ?? undefined,
+    waistCm: entry.waistCm ?? undefined,
+    weightKg: entry.weightKg ?? undefined,
+  }
+}
+
+function serializeCoachCheckIn(entry: CoachCheckInRecord) {
+  return {
+    adherenceScore: entry.adherenceScore ?? undefined,
+    checkInDate: entry.checkInDate,
+    coachId: entry.coachId,
+    coachName: entry.coach.name,
+    createdAt: entry.createdAt,
+    energyScore: entry.energyScore ?? undefined,
+    feedback: entry.feedback,
+    id: entry.id,
+    moodScore: entry.moodScore ?? undefined,
+    nextFocus: entry.nextFocus ?? undefined,
+    recoveryScore: entry.recoveryScore ?? undefined,
+    summary: entry.summary ?? undefined,
   }
 }
 
@@ -271,6 +347,84 @@ function calculateWorkoutVolume(exercises: Array<{ sets?: Array<{ actualReps?: n
   }, 0)
 }
 
+async function assertCoachOwnsTrainee(coachId: string, traineeId: string) {
+  const db = ensurePrisma()
+  const trainee = await db.user.findFirst({
+    where: {
+      coachId,
+      id: traineeId,
+      role: UserRole.trainee,
+    },
+  })
+
+  if (!trainee) {
+    throw new AuthServiceError("Không tìm thấy trainee thuộc coach này.", 404)
+  }
+
+  return trainee
+}
+
+async function assertCoachOwnsProgram(coachId: string, programId: string) {
+  const db = ensurePrisma()
+  const program = await db.program.findFirst({
+    include: {
+      assignments: {
+        include: {
+          user: true,
+        },
+      },
+      workouts: {
+        include: {
+          exercises: {
+            include: {
+              exercise: true,
+              sets: {
+                orderBy: {
+                  setNumber: "asc",
+                },
+              },
+            },
+            orderBy: {
+              order: "asc",
+            },
+          },
+        },
+        orderBy: [{ scheduledDay: "asc" }, { createdAt: "asc" }],
+      },
+    },
+    where: {
+      createdById: coachId,
+      id: programId,
+    },
+  })
+
+  if (!program) {
+    throw new AuthServiceError("Không tìm thấy chương trình.", 404)
+  }
+
+  return program as ProgramRecord
+}
+
+function sanitizeOptionalMeasurement(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) {
+    return undefined
+  }
+
+  return Number(value)
+}
+
+function sanitizeScore(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) {
+    return undefined
+  }
+
+  return Math.max(1, Math.min(10, Math.round(value)))
+}
+
+function normalizePhoneNumber(value?: string | null) {
+  return (value ?? "").replace(/\D/g, "")
+}
+
 async function ensureDefaultExercises() {
   const db = ensurePrisma()
   const currentCount = await db.exercise.count()
@@ -295,6 +449,7 @@ async function listMealsForUser(profile: SerializedProfile, date = new Date()) {
   const db = ensurePrisma()
   const { end, start } = toDateRange(date)
   const recentWindow = toRecentWindow(7)
+  const targetCalories = profile.dailyCalorieGoal ?? DEFAULT_CALORIE_TARGET
 
   const [meals, weeklyMeals] = await Promise.all([
     db.meal.findMany({
@@ -334,11 +489,11 @@ async function listMealsForUser(profile: SerializedProfile, date = new Date()) {
     dailyNutrition: {
       date: start,
       meals: serializedMeals,
-      targetCalories: DEFAULT_CALORIE_TARGET,
+      targetCalories,
       totalCalories,
     },
     meals: serializedMeals,
-    weeklyCalories: buildWeeklyCaloriesChart(weeklyMeals),
+    weeklyCalories: buildWeeklyCaloriesChart(weeklyMeals, targetCalories),
   }
 }
 
@@ -481,14 +636,23 @@ async function listWorkoutsForTrainee(profile: SerializedProfile) {
   })
 
   const workoutMap = new Map<string, WorkoutRecord>()
+  const personalWorkoutIds = new Set<string>()
 
-  assignments.flatMap((assignment) => assignment.program.workouts as WorkoutRecord[]).forEach((workout) => {
-    workoutMap.set(workout.id, workout)
+  assignments.forEach((assignment) => {
+    const isPersonalProgram = assignment.program.createdById === profile.id
+
+    ;(assignment.program.workouts as WorkoutRecord[]).forEach((workout) => {
+      workoutMap.set(workout.id, workout)
+
+      if (isPersonalProgram) {
+        personalWorkoutIds.add(workout.id)
+      }
+    })
   })
 
   const serializedWorkouts = Array.from(workoutMap.values())
     .sort((left, right) => (left.scheduledDay ?? 7) - (right.scheduledDay ?? 7))
-    .map(serializeWorkout)
+    .map((workout) => serializeWorkout(workout, { isPersonal: personalWorkoutIds.has(workout.id) }))
 
   const recentLogs = await db.workoutLog.findMany({
     include: {
@@ -550,6 +714,7 @@ async function getWorkoutDetailForTrainee(profile: SerializedProfile, workoutId:
           order: "asc",
         },
       },
+      program: true,
     },
     where: {
       id: workoutId,
@@ -567,7 +732,9 @@ async function getWorkoutDetailForTrainee(profile: SerializedProfile, workoutId:
     throw new AuthServiceError("Không tìm thấy workout.", 404)
   }
 
-  return serializeWorkout(workout as WorkoutRecord)
+  return serializeWorkout(workout as WorkoutWithProgramRecord, {
+    isPersonal: workout.program?.createdById === profile.id,
+  })
 }
 
 async function createWorkoutLogForTrainee(
@@ -657,24 +824,8 @@ async function createWorkoutLogForTrainee(
   return serializeWorkoutLog(log as WorkoutLogRecord)
 }
 
-async function createPersonalWorkoutForTrainee(
-  profile: SerializedProfile,
-  input: {
-    duration?: number
-    exercises: Array<{
-      exerciseId: string
-      reps: number
-      restTime?: number
-      sets: number
-    }>
-    name: string
-    notes?: string | null
-    scheduledDay?: number
-  },
-) {
+async function normalizePersonalWorkoutInput(input: PersonalWorkoutInput): Promise<NormalizedPersonalWorkoutInput> {
   const db = ensurePrisma()
-  assertTrainee(profile)
-
   const workoutName = input.name.trim()
 
   if (!workoutName) {
@@ -706,6 +857,42 @@ async function createPersonalWorkoutForTrainee(
     throw new AuthServiceError("Có bài tập không tồn tại trong thư viện.", 400)
   }
 
+  return {
+    duration: input.duration ? Math.max(1, Math.round(input.duration)) : undefined,
+    exercises: input.exercises.map((exercise) => ({
+      exerciseId: exercise.exerciseId,
+      reps: Math.max(1, Math.round(exercise.reps)),
+      restTime: exercise.restTime ? Math.max(0, Math.round(exercise.restTime)) : undefined,
+      sets: Math.max(1, Math.round(exercise.sets)),
+    })),
+    name: workoutName,
+    notes: input.notes?.trim() || undefined,
+    scheduledDay: typeof input.scheduledDay === "number" ? input.scheduledDay : undefined,
+  }
+}
+
+function buildPersonalWorkoutExerciseCreateData(exercises: NormalizedPersonalWorkoutInput["exercises"]) {
+  return exercises.map((exercise, exerciseIndex) => ({
+    exerciseId: exercise.exerciseId,
+    order: exerciseIndex + 1,
+    restTime: exercise.restTime,
+    sets: {
+      create: Array.from({ length: exercise.sets }, (_value, setIndex) => ({
+        setNumber: setIndex + 1,
+        targetReps: exercise.reps,
+      })),
+    },
+  }))
+}
+
+async function createPersonalWorkoutForTrainee(
+  profile: SerializedProfile,
+  input: PersonalWorkoutInput,
+) {
+  const db = ensurePrisma()
+  assertTrainee(profile)
+  const normalizedInput = await normalizePersonalWorkoutInput(input)
+
   const program = await db.program.create({
     data: {
       assignments: {
@@ -717,26 +904,16 @@ async function createPersonalWorkoutForTrainee(
       description: "Personal workout created by trainee.",
       difficulty: ProgramDifficulty.beginner,
       duration: 1,
-      name: workoutName,
+      name: normalizedInput.name,
       workouts: {
         create: {
-          duration: input.duration ? Math.max(1, Math.round(input.duration)) : undefined,
+          duration: normalizedInput.duration,
           exercises: {
-            create: input.exercises.map((exercise, exerciseIndex) => ({
-              exerciseId: exercise.exerciseId,
-              order: exerciseIndex + 1,
-              restTime: exercise.restTime ? Math.max(0, Math.round(exercise.restTime)) : undefined,
-              sets: {
-                create: Array.from({ length: Math.max(1, Math.round(exercise.sets)) }, (_value, setIndex) => ({
-                  setNumber: setIndex + 1,
-                  targetReps: Math.max(1, Math.round(exercise.reps)),
-                })),
-              },
-            })),
+            create: buildPersonalWorkoutExerciseCreateData(normalizedInput.exercises),
           },
-          name: workoutName,
-          notes: input.notes?.trim() || undefined,
-          scheduledDay: typeof input.scheduledDay === "number" ? input.scheduledDay : undefined,
+          name: normalizedInput.name,
+          notes: normalizedInput.notes,
+          scheduledDay: normalizedInput.scheduledDay,
         },
       },
       workoutsPerWeek: 1,
@@ -768,7 +945,152 @@ async function createPersonalWorkoutForTrainee(
     throw new AuthServiceError("Không thể tạo buổi tập.", 500)
   }
 
-  return serializeWorkout(workout as WorkoutRecord)
+  return serializeWorkout(workout as WorkoutRecord, {
+    isPersonal: true,
+  })
+}
+
+async function updatePersonalWorkoutForTrainee(
+  profile: SerializedProfile,
+  workoutId: string,
+  input: PersonalWorkoutInput,
+) {
+  const db = ensurePrisma()
+  assertTrainee(profile)
+
+  const normalizedInput = await normalizePersonalWorkoutInput(input)
+  const existingWorkout = await db.workout.findFirst({
+    select: {
+      id: true,
+      programId: true,
+    },
+    where: {
+      id: workoutId,
+      program: {
+        assignments: {
+          some: {
+            userId: profile.id,
+          },
+        },
+        createdById: profile.id,
+      },
+    },
+  })
+
+  if (!existingWorkout) {
+    throw new AuthServiceError("Không tìm thấy lịch tập cá nhân.", 404)
+  }
+
+  const updatedWorkout = await db.$transaction(async (tx) => {
+    await tx.workoutExercise.deleteMany({
+      where: {
+        workoutId: existingWorkout.id,
+      },
+    })
+
+    const workout = await tx.workout.update({
+      data: {
+        duration: normalizedInput.duration ?? null,
+        exercises: {
+          create: buildPersonalWorkoutExerciseCreateData(normalizedInput.exercises),
+        },
+        name: normalizedInput.name,
+        notes: normalizedInput.notes ?? null,
+        scheduledDay: normalizedInput.scheduledDay ?? null,
+      },
+      include: {
+        exercises: {
+          include: {
+            exercise: true,
+            sets: {
+              orderBy: {
+                setNumber: "asc",
+              },
+            },
+          },
+          orderBy: {
+            order: "asc",
+          },
+        },
+      },
+      where: {
+        id: existingWorkout.id,
+      },
+    })
+
+    if (existingWorkout.programId) {
+      await tx.program.update({
+        data: {
+          name: normalizedInput.name,
+        },
+        where: {
+          id: existingWorkout.programId,
+        },
+      })
+    }
+
+    return workout
+  })
+
+  return serializeWorkout(updatedWorkout as WorkoutRecord, {
+    isPersonal: true,
+  })
+}
+
+async function deletePersonalWorkoutForTrainee(profile: SerializedProfile, workoutId: string) {
+  const db = ensurePrisma()
+  assertTrainee(profile)
+
+  const workout = await db.workout.findFirst({
+    select: {
+      id: true,
+      programId: true,
+    },
+    where: {
+      id: workoutId,
+      program: {
+        assignments: {
+          some: {
+            userId: profile.id,
+          },
+        },
+        createdById: profile.id,
+      },
+    },
+  })
+
+  if (!workout) {
+    throw new AuthServiceError("Không tìm thấy lịch tập cá nhân.", 404)
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.workout.delete({
+      where: {
+        id: workout.id,
+      },
+    })
+
+    if (workout.programId) {
+      const remainingWorkoutCount = await tx.workout.count({
+        where: {
+          programId: workout.programId,
+        },
+      })
+
+      if (remainingWorkoutCount === 0) {
+        await tx.program.delete({
+          where: {
+            id: workout.programId,
+          },
+        })
+      }
+    }
+  })
+
+  return {
+    deleted: true,
+    id: workout.id,
+  }
 }
 
 async function listAvailableCoachesForTrainee(profile: SerializedProfile) {
@@ -1252,7 +1574,168 @@ async function deleteCoachProgram(profile: SerializedProfile, programId: string)
   }
 }
 
-async function listCoachTrainees(profile: SerializedProfile) {
+async function assignCoachProgramToTrainee(profile: SerializedProfile, programId: string, traineeId: string) {
+  const db = ensurePrisma()
+  assertCoach(profile)
+
+  await Promise.all([assertCoachOwnsProgram(profile.id, programId), assertCoachOwnsTrainee(profile.id, traineeId)])
+
+  const assignment = await db.programAssignment.upsert({
+    create: {
+      programId,
+      userId: traineeId,
+    },
+    update: {},
+    where: {
+      programId_userId: {
+        programId,
+        userId: traineeId,
+      },
+    },
+  })
+
+  return {
+    assigned: true,
+    programId: assignment.programId,
+    traineeId: assignment.userId,
+  }
+}
+
+async function unassignCoachProgramFromTrainee(profile: SerializedProfile, programId: string, traineeId: string) {
+  const db = ensurePrisma()
+  assertCoach(profile)
+
+  await Promise.all([assertCoachOwnsProgram(profile.id, programId), assertCoachOwnsTrainee(profile.id, traineeId)])
+
+  const existingAssignment = await db.programAssignment.findUnique({
+    where: {
+      programId_userId: {
+        programId,
+        userId: traineeId,
+      },
+    },
+  })
+
+  if (!existingAssignment) {
+    throw new AuthServiceError("Trainee này chưa được gán vào chương trình.", 404)
+  }
+
+  await db.programAssignment.delete({
+    where: {
+      programId_userId: {
+        programId,
+        userId: traineeId,
+      },
+    },
+  })
+
+  return {
+    deleted: true,
+    programId,
+    traineeId,
+  }
+}
+
+async function createBodyMetricForTrainee(
+  profile: SerializedProfile,
+  traineeId: string,
+  input: {
+    armCm?: number | null
+    bodyFatPct?: number | null
+    chestCm?: number | null
+    hipsCm?: number | null
+    note?: string | null
+    recordedAt?: string | null
+    thighCm?: number | null
+    waistCm?: number | null
+    weightKg?: number | null
+  },
+) {
+  const db = ensurePrisma()
+  assertCoach(profile)
+
+  await assertCoachOwnsTrainee(profile.id, traineeId)
+
+  const metricPayload = {
+    armCm: sanitizeOptionalMeasurement(input.armCm),
+    bodyFatPct: sanitizeOptionalMeasurement(input.bodyFatPct),
+    chestCm: sanitizeOptionalMeasurement(input.chestCm),
+    hipsCm: sanitizeOptionalMeasurement(input.hipsCm),
+    thighCm: sanitizeOptionalMeasurement(input.thighCm),
+    waistCm: sanitizeOptionalMeasurement(input.waistCm),
+    weightKg: sanitizeOptionalMeasurement(input.weightKg),
+  }
+
+  const hasMetricValue = Object.values(metricPayload).some((value) => value != null)
+  const note = input.note?.trim() || undefined
+
+  if (!hasMetricValue && !note) {
+    throw new AuthServiceError("Vui lòng nhập ít nhất một chỉ số hoặc ghi chú.", 400)
+  }
+
+  const entry = await db.bodyMetricEntry.create({
+    data: {
+      ...metricPayload,
+      coachId: profile.id,
+      note,
+      recordedAt: input.recordedAt ? new Date(input.recordedAt) : new Date(),
+      traineeId,
+    },
+    include: {
+      coach: true,
+    },
+  })
+
+  return serializeBodyMetricEntry(entry as BodyMetricRecord)
+}
+
+async function createCoachCheckInForTrainee(
+  profile: SerializedProfile,
+  traineeId: string,
+  input: {
+    adherenceScore?: number | null
+    checkInDate?: string | null
+    energyScore?: number | null
+    feedback: string
+    moodScore?: number | null
+    nextFocus?: string | null
+    recoveryScore?: number | null
+    summary?: string | null
+  },
+) {
+  const db = ensurePrisma()
+  assertCoach(profile)
+
+  await assertCoachOwnsTrainee(profile.id, traineeId)
+
+  const feedback = input.feedback.trim()
+
+  if (!feedback) {
+    throw new AuthServiceError("Feedback không được để trống.", 400)
+  }
+
+  const checkIn = await db.coachCheckIn.create({
+    data: {
+      adherenceScore: sanitizeScore(input.adherenceScore),
+      checkInDate: input.checkInDate ? new Date(input.checkInDate) : new Date(),
+      coachId: profile.id,
+      energyScore: sanitizeScore(input.energyScore),
+      feedback,
+      moodScore: sanitizeScore(input.moodScore),
+      nextFocus: input.nextFocus?.trim() || undefined,
+      recoveryScore: sanitizeScore(input.recoveryScore),
+      summary: input.summary?.trim() || undefined,
+      traineeId,
+    },
+    include: {
+      coach: true,
+    },
+  })
+
+  return serializeCoachCheckIn(checkIn as CoachCheckInRecord)
+}
+
+async function listCoachTrainees(profile: SerializedProfile, options?: { phone?: string }) {
   assertCoach(profile)
   const db = ensurePrisma()
   const trainees = await db.user.findMany({
@@ -1273,37 +1756,94 @@ async function listCoachTrainees(profile: SerializedProfile) {
     },
   })
 
-  const traineeIds = trainees.map((trainee) => trainee.id)
+  const phoneQuery = normalizePhoneNumber(options?.phone)
+  const filteredTrainees = phoneQuery
+    ? trainees.filter((trainee) => normalizePhoneNumber(trainee.phone).includes(phoneQuery))
+    : trainees
+
+  const traineeIds = filteredTrainees.map((trainee) => trainee.id)
   const recentWindow = toRecentWindow(7)
-  const recentLogs = traineeIds.length
-    ? await db.workoutLog.findMany({
-        select: {
-          userId: true,
-        },
-        where: {
-          startedAt: {
-            gte: recentWindow.start,
-            lte: recentWindow.end,
+  const [recentLogs, recentMetrics, recentCheckIns] = traineeIds.length
+    ? await Promise.all([
+        db.workoutLog.findMany({
+          select: {
+            userId: true,
           },
-          userId: {
-            in: traineeIds,
+          where: {
+            startedAt: {
+              gte: recentWindow.start,
+              lte: recentWindow.end,
+            },
+            userId: {
+              in: traineeIds,
+            },
           },
-        },
-      })
-    : []
+        }),
+        db.bodyMetricEntry.findMany({
+          orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }],
+          select: {
+            recordedAt: true,
+            traineeId: true,
+            weightKg: true,
+          },
+          where: {
+            traineeId: {
+              in: traineeIds,
+            },
+          },
+        }),
+        db.coachCheckIn.findMany({
+          orderBy: [{ checkInDate: "desc" }, { createdAt: "desc" }],
+          select: {
+            checkInDate: true,
+            traineeId: true,
+          },
+          where: {
+            traineeId: {
+              in: traineeIds,
+            },
+          },
+        }),
+      ])
+    : [[], [], []]
 
   const thisWeekByUser = recentLogs.reduce<Map<string, number>>((accumulator, log) => {
     accumulator.set(log.userId, (accumulator.get(log.userId) ?? 0) + 1)
     return accumulator
   }, new Map())
 
-  return trainees.map((trainee) => ({
+  const latestMetricByUser = recentMetrics.reduce<Map<string, { recordedAt: Date; weightKg: number | null }>>(
+    (accumulator, metric) => {
+      if (!accumulator.has(metric.traineeId)) {
+        accumulator.set(metric.traineeId, {
+          recordedAt: metric.recordedAt,
+          weightKg: metric.weightKg,
+        })
+      }
+
+      return accumulator
+    },
+    new Map(),
+  )
+
+  const latestCheckInByUser = recentCheckIns.reduce<Map<string, Date>>((accumulator, checkIn) => {
+    if (!accumulator.has(checkIn.traineeId)) {
+      accumulator.set(checkIn.traineeId, checkIn.checkInDate)
+    }
+
+    return accumulator
+  }, new Map())
+
+  return filteredTrainees.map((trainee) => ({
     avatar: trainee.avatar,
     createdAt: trainee.createdAt,
     email: trainee.email,
     fitnessGoals: trainee.fitnessGoals,
     id: trainee.id,
+    lastCheckInAt: latestCheckInByUser.get(trainee.id),
+    latestWeightKg: latestMetricByUser.get(trainee.id)?.weightKg ?? undefined,
     name: trainee.name,
+    phone: trainee.phone ?? undefined,
     programCount: trainee._count.programAssignments,
     thisWeekWorkouts: thisWeekByUser.get(trainee.id) ?? 0,
     totalWorkoutLogs: trainee._count.workoutLogs,
@@ -1391,18 +1931,75 @@ async function getCoachTraineeDetail(profile: SerializedProfile, traineeId: stri
   }
 
   const recentWindow = toRecentWindow(7)
-  const thisWeekWorkouts = await db.workoutLog.count({
-    where: {
-      startedAt: {
-        gte: recentWindow.start,
-        lte: recentWindow.end,
+  const last30Days = toRecentWindow(30)
+  const [thisWeekWorkouts, progressLogs, bodyMetrics, checkIns] = await Promise.all([
+    db.workoutLog.count({
+      where: {
+        startedAt: {
+          gte: recentWindow.start,
+          lte: recentWindow.end,
+        },
+        userId: trainee.id,
       },
-      userId: trainee.id,
-    },
-  })
+    }),
+    db.workoutLog.findMany({
+      orderBy: {
+        startedAt: "desc",
+      },
+      select: {
+        startedAt: true,
+        totalVolume: true,
+      },
+      where: {
+        startedAt: {
+          gte: last30Days.start,
+          lte: last30Days.end,
+        },
+        userId: trainee.id,
+      },
+    }),
+    db.bodyMetricEntry.findMany({
+      include: {
+        coach: true,
+      },
+      orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }],
+      take: 12,
+      where: {
+        traineeId: trainee.id,
+      },
+    }),
+    db.coachCheckIn.findMany({
+      include: {
+        coach: true,
+      },
+      orderBy: [{ checkInDate: "desc" }, { createdAt: "desc" }],
+      take: 8,
+      where: {
+        traineeId: trainee.id,
+      },
+    }),
+  ])
+
+  const plannedSessionsPerWeek = trainee.programAssignments.reduce(
+    (sum, assignment) => sum + assignment.program.workoutsPerWeek,
+    0,
+  )
+  const totalVolumeLast30Days = progressLogs.reduce((sum, log) => sum + (log.totalVolume ?? 0), 0)
+  const completionRate =
+    plannedSessionsPerWeek > 0 ? Math.min(100, Math.round((thisWeekWorkouts / plannedSessionsPerWeek) * 100)) : 0
 
   return {
+    bodyMetrics: bodyMetrics.map((entry) => serializeBodyMetricEntry(entry as BodyMetricRecord)),
+    checkIns: checkIns.map((entry) => serializeCoachCheckIn(entry as CoachCheckInRecord)),
     programs: trainee.programAssignments.map((assignment) => serializeProgram(assignment.program as ProgramRecord)),
+    progressSummary: {
+      completionRate,
+      latestWorkoutAt: trainee.workoutLogs[0]?.startedAt ?? progressLogs[0]?.startedAt ?? undefined,
+      plannedSessionsPerWeek,
+      totalVolumeLast30Days,
+      workoutsLast30Days: progressLogs.length,
+      workoutsLast7Days: thisWeekWorkouts,
+    },
     recentLogs: trainee.workoutLogs.map((log) => serializeWorkoutLog(log as WorkoutLogRecord)),
     trainee: {
       avatar: trainee.avatar,
@@ -1410,7 +2007,10 @@ async function getCoachTraineeDetail(profile: SerializedProfile, traineeId: stri
       email: trainee.email,
       fitnessGoals: trainee.fitnessGoals,
       id: trainee.id,
+      lastCheckInAt: checkIns[0]?.checkInDate,
+      latestWeightKg: bodyMetrics[0]?.weightKg ?? undefined,
       name: trainee.name,
+      phone: trainee.phone ?? undefined,
       programCount: trainee._count.programAssignments,
       thisWeekWorkouts,
       totalWorkoutLogs: trainee._count.workoutLogs,
@@ -1517,13 +2117,17 @@ async function updateCoachRequestStatus(
 }
 
 export {
+  assignCoachProgramToTrainee,
+  createBodyMetricForTrainee,
+  createCoachCheckInForTrainee,
   createCoachRequestForTrainee,
   createCoachProgram,
   createMealForUser,
   createPersonalWorkoutForTrainee,
   createWorkoutLogForTrainee,
-  deleteMealForUser,
   deleteCoachProgram,
+  deleteMealForUser,
+  deletePersonalWorkoutForTrainee,
   getCoachDashboard,
   getCoachProgramDetail,
   getCoachTraineeDetail,
@@ -1534,7 +2138,9 @@ export {
   listExercises,
   listMealsForUser,
   listWorkoutsForTrainee,
+  unassignCoachProgramFromTrainee,
   updateCoachProgram,
   updateCoachRequestStatus,
   updateMealForUser,
+  updatePersonalWorkoutForTrainee,
 }

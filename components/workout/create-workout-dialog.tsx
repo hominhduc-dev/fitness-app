@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Loader2, Plus, Trash2 } from "lucide-react"
 
@@ -12,6 +12,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -19,9 +20,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { createWorkout, fetchExercises } from "@/lib/fitness/api"
-import type { Exercise } from "@/lib/types"
+import { createWorkout, fetchExercises, updateWorkout } from "@/lib/fitness/api"
+import type { Exercise, Workout } from "@/lib/types"
 
 type WorkoutExerciseDraft = {
   exerciseId: string
@@ -31,8 +33,13 @@ type WorkoutExerciseDraft = {
   sets: string
 }
 
+type DialogMode = "create" | "template"
+
 type CreateWorkoutDialogProps = {
+  defaultScheduledDay?: number
   trigger?: React.ReactNode
+  workoutTemplates?: Workout[]
+  workoutToEdit?: Workout
 }
 
 const DAY_OPTIONS = [
@@ -63,31 +70,147 @@ function createExerciseDraft(defaultExerciseId = ""): WorkoutExerciseDraft {
   }
 }
 
-export function CreateWorkoutDialog({ trigger }: CreateWorkoutDialogProps) {
+function createExerciseDraftFromWorkout(exercise: Workout["exercises"][number]): WorkoutExerciseDraft {
+  return {
+    exerciseId: exercise.exercise.id,
+    id: createDraftId(),
+    reps: String(Math.max(1, exercise.sets[0]?.targetReps ?? 1)),
+    restTime: exercise.restTime != null ? String(exercise.restTime) : "",
+    sets: String(Math.max(1, exercise.sets.length)),
+  }
+}
+
+function getExerciseGroups(workout: Workout) {
+  return Array.from(new Set(workout.exercises.map((exercise) => exercise.exercise.muscleGroup))).slice(0, 3)
+}
+
+function getExercisePreview(workout: Workout) {
+  return workout.exercises
+    .slice(0, 3)
+    .map((exercise) => exercise.exercise.name)
+    .join(", ")
+}
+
+function sortWorkoutTemplates(workouts: Workout[]) {
+  return workouts
+    .filter((workout) => workout.exercises.length > 0)
+    .slice()
+    .sort((left, right) => {
+      const personalDelta = Number(Boolean(right.isPersonal)) - Number(Boolean(left.isPersonal))
+
+      if (personalDelta !== 0) {
+        return personalDelta
+      }
+
+      return left.name.localeCompare(right.name)
+    })
+}
+
+function getDayLabel(dayValue: string) {
+  return DAY_OPTIONS.find((option) => option.value === dayValue)?.label ?? "Selected Day"
+}
+
+export function CreateWorkoutDialog({
+  defaultScheduledDay,
+  trigger,
+  workoutTemplates = [],
+  workoutToEdit,
+}: CreateWorkoutDialogProps) {
   const router = useRouter()
   const { isLoading: authLoading, session } = useAuth()
+  const isEditing = Boolean(workoutToEdit)
+  const [isMounted, setIsMounted] = useState(false)
   const [open, setOpen] = useState(false)
+  const [exerciseOptions, setExerciseOptions] = useState<Exercise[]>([])
+  const [mode, setMode] = useState<DialogMode>("create")
   const [name, setName] = useState("")
-  const [scheduledDay, setScheduledDay] = useState(String(new Date().getDay()))
+  const [scheduledDay, setScheduledDay] = useState(String(defaultScheduledDay ?? new Date().getDay()))
   const [duration, setDuration] = useState("45")
   const [notes, setNotes] = useState("")
-  const [exerciseOptions, setExerciseOptions] = useState<Exercise[]>([])
   const [exerciseRows, setExerciseRows] = useState<WorkoutExerciseDraft[]>([createExerciseDraft()])
   const [isLoadingExercises, setIsLoadingExercises] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const templateOptions = useMemo(
+    () => (isEditing ? [] : sortWorkoutTemplates(workoutTemplates)),
+    [isEditing, workoutTemplates],
+  )
+  const hasTemplateOptions = templateOptions.length > 0
+  const isScheduledDayLocked = !isEditing && typeof defaultScheduledDay === "number"
+  const selectedDayLabel = getDayLabel(scheduledDay)
+  const triggerContent = trigger ?? (
+    <Button className="gap-2 bg-primary hover:bg-primary/90" disabled={authLoading}>
+      <Plus className="h-4 w-4" />
+      Create workout
+    </Button>
+  )
+
+  const getDefaultMode = () => {
+    if (hasTemplateOptions && isScheduledDayLocked) {
+      return "template" as const
+    }
+
+    return "create" as const
+  }
+
+  const createInitialFormState = (defaultExerciseId = "") => {
+    if (workoutToEdit) {
+      return {
+        duration: workoutToEdit.duration ? String(workoutToEdit.duration) : "45",
+        exerciseRows:
+          workoutToEdit.exercises.length > 0
+            ? workoutToEdit.exercises.map(createExerciseDraftFromWorkout)
+            : [createExerciseDraft(defaultExerciseId)],
+        name: workoutToEdit.name,
+        notes: workoutToEdit.notes ?? "",
+        scheduledDay: String(workoutToEdit.scheduledDay ?? defaultScheduledDay ?? new Date().getDay()),
+      }
+    }
+
+    return {
+      duration: "45",
+      exerciseRows: [createExerciseDraft(defaultExerciseId)],
+      name: "",
+      notes: "",
+      scheduledDay: String(defaultScheduledDay ?? new Date().getDay()),
+    }
+  }
+
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
   const resetForm = () => {
-    setName("")
-    setScheduledDay(String(new Date().getDay()))
-    setDuration("45")
-    setNotes("")
-    setExerciseRows([createExerciseDraft(exerciseOptions[0]?.id ?? "")])
+    const initialState = createInitialFormState(exerciseOptions[0]?.id ?? "")
+
+    setName(initialState.name)
+    setScheduledDay(initialState.scheduledDay)
+    setDuration(initialState.duration)
+    setNotes(initialState.notes)
+    setExerciseRows(initialState.exerciseRows)
+    setMode(getDefaultMode())
+    setActiveTemplateId(null)
     setError(null)
   }
 
   useEffect(() => {
-    if (!open || !session?.access_token || exerciseOptions.length > 0) {
+    if (!open) {
+      resetForm()
+    }
+  }, [defaultScheduledDay, exerciseOptions.length, open, workoutToEdit])
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    setMode(getDefaultMode())
+  }, [defaultScheduledDay, hasTemplateOptions, isScheduledDayLocked, open])
+
+  useEffect(() => {
+    if (!open || !session?.access_token || exerciseOptions.length > 0 || (!isEditing && mode !== "create")) {
       return
     }
 
@@ -131,7 +254,7 @@ export function CreateWorkoutDialog({ trigger }: CreateWorkoutDialogProps) {
     return () => {
       cancelled = true
     }
-  }, [exerciseOptions.length, open, session?.access_token])
+  }, [exerciseOptions.length, isEditing, mode, open, session?.access_token])
 
   const addExerciseRow = () => {
     setExerciseRows((current) => [...current, createExerciseDraft(exerciseOptions[0]?.id ?? "")])
@@ -163,7 +286,7 @@ export function CreateWorkoutDialog({ trigger }: CreateWorkoutDialogProps) {
     event.preventDefault()
 
     if (!session?.access_token) {
-      setError("You need to be signed in to create a workout.")
+      setError("You need to be signed in to save a workout.")
       return
     }
 
@@ -187,64 +310,333 @@ export function CreateWorkoutDialog({ trigger }: CreateWorkoutDialogProps) {
     }
 
     setIsSaving(true)
+    setActiveTemplateId(null)
     setError(null)
 
     try {
-      await createWorkout(session.access_token, {
+      const payload = {
         duration: duration ? Math.max(1, Number(duration) || 1) : undefined,
         exercises: normalizedExercises,
         name: name.trim(),
         notes: notes.trim() || undefined,
+        scheduledDay: Number(scheduledDay),
+      }
+
+      if (isEditing && workoutToEdit) {
+        await updateWorkout(session.access_token, workoutToEdit.id, payload)
+      } else {
+        await createWorkout(session.access_token, payload)
+      }
+
+      handleOpenChange(false)
+      router.refresh()
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : isEditing
+            ? "Unable to update workout."
+            : "Unable to create workout.",
+      )
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleTemplateSelect = async (template: Workout) => {
+    if (!session?.access_token || isSaving) {
+      return
+    }
+
+    if (template.exercises.length === 0) {
+      setError("This template has no exercises yet.")
+      return
+    }
+
+    setIsSaving(true)
+    setActiveTemplateId(template.id)
+    setError(null)
+
+    try {
+      await createWorkout(session.access_token, {
+        duration: template.duration,
+        exercises: template.exercises.map((exercise) => ({
+          exerciseId: exercise.exercise.id,
+          reps: Math.max(1, exercise.sets[0]?.targetReps ?? 1),
+          restTime: exercise.restTime,
+          sets: Math.max(1, exercise.sets.length),
+        })),
+        name: template.name,
+        notes: template.notes,
         scheduledDay: Number(scheduledDay),
       })
 
       handleOpenChange(false)
       router.refresh()
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Unable to create workout.")
+      setError(saveError instanceof Error ? saveError.message : "Unable to add this template.")
     } finally {
       setIsSaving(false)
+      setActiveTemplateId(null)
     }
+  }
+
+  const dialogTitle = isEditing ? "Edit Workout" : isScheduledDayLocked ? `Add Workout to ${selectedDayLabel}` : "Add Workout"
+  const dialogDescription = isEditing
+    ? "Update the workout details and keep this session aligned with your schedule."
+    : hasTemplateOptions
+      ? "Create a fresh workout or drop in one of your saved templates."
+      : "Build a personal workout and add it straight to your schedule without waiting for a coach assignment."
+  const saveButtonLabel = isSaving ? (isEditing ? "Saving..." : "Creating...") : isEditing ? "Save changes" : "Save workout"
+
+  const createTab = (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2 md:col-span-2">
+          <Label htmlFor="workout-name">Workout name</Label>
+          <Input
+            id="workout-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="e.g. Saturday Push Session"
+            required
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="workout-duration">Estimated duration (minutes)</Label>
+          <Input
+            id="workout-duration"
+            type="number"
+            min={1}
+            value={duration}
+            onChange={(event) => setDuration(event.target.value)}
+            placeholder="45"
+          />
+        </div>
+
+        <div className="space-y-2 md:col-span-2">
+          <Label htmlFor="workout-notes">Notes</Label>
+          <Textarea
+            id="workout-notes"
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="Optional cues, focus points, or equipment notes."
+          />
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">Exercises</h3>
+            <p className="text-sm text-muted-foreground">Choose the movements and target set structure.</p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2 bg-transparent"
+            onClick={addExerciseRow}
+            disabled={isLoadingExercises || exerciseOptions.length === 0}
+          >
+            <Plus className="h-4 w-4" />
+            Add exercise
+          </Button>
+        </div>
+
+        <div className="space-y-3">
+          {exerciseRows.map((row) => (
+            <div key={row.id} className="rounded-xl border border-border bg-muted/20 p-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <div className="min-w-0 flex-1">
+                  <Label className="sr-only">Exercise</Label>
+                  <Select
+                    value={row.exerciseId}
+                    onValueChange={(value) => updateExerciseRow(row.id, { exerciseId: value })}
+                    disabled={isLoadingExercises}
+                  >
+                    <SelectTrigger aria-label="Exercise" className="h-10 w-full">
+                      <SelectValue placeholder={isLoadingExercises ? "Loading exercises..." : "Choose an exercise"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {exerciseOptions.map((exercise) => (
+                        <SelectItem key={exercise.id} value={exercise.id}>
+                          {exercise.name} · {exercise.muscleGroup}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor={`${row.id}-sets`} className="sr-only">
+                      Sets
+                    </Label>
+                    <Input
+                      id={`${row.id}-sets`}
+                      type="number"
+                      min={1}
+                      value={row.sets}
+                      onChange={(event) => updateExerciseRow(row.id, { sets: event.target.value })}
+                      className="h-10 w-14 text-center"
+                    />
+                    <span className="text-sm text-muted-foreground">sets</span>
+                  </div>
+
+                  <span className="text-sm text-muted-foreground">x</span>
+
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor={`${row.id}-reps`} className="sr-only">
+                      Reps
+                    </Label>
+                    <Input
+                      id={`${row.id}-reps`}
+                      type="number"
+                      min={1}
+                      value={row.reps}
+                      onChange={(event) => updateExerciseRow(row.id, { reps: event.target.value })}
+                      className="h-10 w-14 text-center"
+                    />
+                    <span className="text-sm text-muted-foreground">reps</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor={`${row.id}-rest`} className="sr-only">
+                      Rest time in seconds
+                    </Label>
+                    <Input
+                      id={`${row.id}-rest`}
+                      type="number"
+                      min={0}
+                      value={row.restTime}
+                      onChange={(event) => updateExerciseRow(row.id, { restTime: event.target.value })}
+                      placeholder="90"
+                      className="h-10 w-16 text-center"
+                    />
+                    <span className="text-sm text-muted-foreground">sec</span>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-10 w-10 shrink-0"
+                    onClick={() => removeExerciseRow(row.id)}
+                    disabled={exerciseRows.length === 1}
+                    aria-label="Remove exercise"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button type="button" variant="outline" className="bg-transparent" onClick={() => handleOpenChange(false)}>
+          Cancel
+        </Button>
+        <Button type="submit" className="gap-2 bg-primary hover:bg-primary/90" disabled={isSaving || isLoadingExercises}>
+          {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : !isEditing ? <Plus className="h-4 w-4" /> : null}
+          {saveButtonLabel}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+
+  const templateTab = (
+    <div className="space-y-4">
+      {hasTemplateOptions ? (
+        <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+          {templateOptions.map((template) => {
+            const isActive = activeTemplateId === template.id
+            const exercisePreview = getExercisePreview(template)
+            const exerciseGroups = getExerciseGroups(template)
+
+            return (
+              <div key={template.id} className="rounded-2xl border border-border bg-card p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-xl font-semibold text-foreground">{template.name}</h3>
+                      {template.isPersonal ? (
+                        <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                          Personal
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {template.exercises.length} exercises · {template.duration ?? 45} min
+                    </p>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="bg-transparent"
+                    onClick={() => void handleTemplateSelect(template)}
+                    disabled={isSaving}
+                  >
+                    {isActive ? "Adding..." : "Select"}
+                  </Button>
+                </div>
+
+                {exerciseGroups.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {exerciseGroups.map((group) => (
+                      <span key={group} className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                        {group}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                {exercisePreview ? <p className="mt-3 text-sm text-muted-foreground">{exercisePreview}</p> : null}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">No workout templates yet. Switch to Create New to build your first one.</p>
+        </div>
+      )}
+
+      <DialogFooter>
+        <Button type="button" variant="outline" className="bg-transparent" onClick={() => handleOpenChange(false)}>
+          Cancel
+        </Button>
+      </DialogFooter>
+    </div>
+  )
+
+  if (!isMounted) {
+    return <>{triggerContent}</>
   }
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        {trigger ?? (
-          <Button className="gap-2 bg-primary hover:bg-primary/90" disabled={authLoading}>
-            <Plus className="h-4 w-4" />
-            Create workout
-          </Button>
-        )}
+        {triggerContent}
       </DialogTrigger>
 
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Create your own workout</DialogTitle>
-          <DialogDescription>
-            Build a personal workout and add it straight to your schedule without waiting for a coach assignment.
-          </DialogDescription>
+          <DialogTitle>{dialogTitle}</DialogTitle>
+          <DialogDescription>{dialogDescription}</DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="space-y-5 overflow-y-auto pr-1">
           {error ? (
             <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
               {error}
             </div>
           ) : null}
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="workout-name">Workout name</Label>
-              <Input
-                id="workout-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="e.g. Saturday Push Session"
-                required
-              />
-            </div>
-
+          {!isScheduledDayLocked ? (
             <div className="space-y-2">
               <Label htmlFor="workout-day">Scheduled day</Label>
               <Select value={scheduledDay} onValueChange={setScheduledDay}>
@@ -260,133 +652,26 @@ export function CreateWorkoutDialog({ trigger }: CreateWorkoutDialogProps) {
                 </SelectContent>
               </Select>
             </div>
+          ) : null}
 
-            <div className="space-y-2">
-              <Label htmlFor="workout-duration">Estimated duration (minutes)</Label>
-              <Input
-                id="workout-duration"
-                type="number"
-                min={1}
-                value={duration}
-                onChange={(event) => setDuration(event.target.value)}
-                placeholder="45"
-              />
-            </div>
+          {hasTemplateOptions ? (
+            <Tabs value={mode} onValueChange={(value) => setMode(value as DialogMode)} className="gap-4">
+              <TabsList className="grid h-auto w-full grid-cols-2 rounded-2xl p-1">
+                <TabsTrigger value="create" className="rounded-xl py-2.5">
+                  Create New
+                </TabsTrigger>
+                <TabsTrigger value="template" className="rounded-xl py-2.5">
+                  From Template
+                </TabsTrigger>
+              </TabsList>
 
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="workout-notes">Notes</Label>
-              <Textarea
-                id="workout-notes"
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Optional cues, focus points, or equipment notes."
-              />
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold">Exercises</h3>
-                <p className="text-sm text-muted-foreground">Choose the movements and target set structure.</p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="gap-2 bg-transparent"
-                onClick={addExerciseRow}
-                disabled={isLoadingExercises || exerciseOptions.length === 0}
-              >
-                <Plus className="h-4 w-4" />
-                Add exercise
-              </Button>
-            </div>
-
-            <div className="space-y-3">
-              {exerciseRows.map((row, index) => (
-                <div key={row.id} className="rounded-2xl border border-border bg-muted/20 p-4">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold">Exercise {index + 1}</p>
-                      <p className="text-xs text-muted-foreground">Sets, reps, and rest can be adjusted per movement.</p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeExerciseRow(row.id)}
-                      disabled={exerciseRows.length === 1}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1.5fr)_120px_120px_140px]">
-                    <div className="space-y-2">
-                      <Label>Exercise</Label>
-                      <Select
-                        value={row.exerciseId}
-                        onValueChange={(value) => updateExerciseRow(row.id, { exerciseId: value })}
-                        disabled={isLoadingExercises}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder={isLoadingExercises ? "Loading exercises..." : "Choose an exercise"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {exerciseOptions.map((exercise) => (
-                            <SelectItem key={exercise.id} value={exercise.id}>
-                              {exercise.name} · {exercise.muscleGroup}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Sets</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={row.sets}
-                        onChange={(event) => updateExerciseRow(row.id, { sets: event.target.value })}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Reps</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={row.reps}
-                        onChange={(event) => updateExerciseRow(row.id, { reps: event.target.value })}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Rest (sec)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        value={row.restTime}
-                        onChange={(event) => updateExerciseRow(row.id, { restTime: event.target.value })}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" className="bg-transparent" onClick={() => handleOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" className="gap-2 bg-primary hover:bg-primary/90" disabled={isSaving || isLoadingExercises}>
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              {isSaving ? "Creating..." : "Save workout"}
-            </Button>
-          </div>
-        </form>
+              <TabsContent value="create">{createTab}</TabsContent>
+              <TabsContent value="template">{templateTab}</TabsContent>
+            </Tabs>
+          ) : (
+            createTab
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   )

@@ -19,7 +19,10 @@ type CoachTrainee = {
   email: string
   fitnessGoals: string[]
   id: string
+  lastCheckInAt?: Date
+  latestWeightKg?: number
   name: string
+  phone?: string
   programCount: number
   thisWeekWorkouts: number
   totalWorkoutLogs: number
@@ -58,6 +61,46 @@ type CoachDashboardData = {
   trainees: CoachTrainee[]
 }
 
+type BodyMetricEntry = {
+  armCm?: number
+  bodyFatPct?: number
+  chestCm?: number
+  coachId?: string
+  coachName?: string
+  createdAt: Date
+  hipsCm?: number
+  id: string
+  note?: string
+  recordedAt: Date
+  thighCm?: number
+  waistCm?: number
+  weightKg?: number
+}
+
+type CoachCheckIn = {
+  adherenceScore?: number
+  checkInDate: Date
+  coachId: string
+  coachName: string
+  createdAt: Date
+  energyScore?: number
+  feedback: string
+  id: string
+  moodScore?: number
+  nextFocus?: string
+  recoveryScore?: number
+  summary?: string
+}
+
+type CoachProgressSummary = {
+  completionRate: number
+  latestWorkoutAt?: Date
+  plannedSessionsPerWeek: number
+  totalVolumeLast30Days: number
+  workoutsLast30Days: number
+  workoutsLast7Days: number
+}
+
 type DiscoverableCoach = {
   activeTrainees: number
   avatar?: string | null
@@ -71,12 +114,16 @@ type DiscoverableCoach = {
 }
 
 type CoachTraineeDetail = {
+  bodyMetrics: BodyMetricEntry[]
+  checkIns: CoachCheckIn[]
   programs: CoachProgram[]
+  progressSummary: CoachProgressSummary
   recentLogs: WorkoutLog[]
   trainee: CoachTrainee
 }
 
 type CreateCoachProgramInput = {
+  assignToUserIds?: string[]
   description?: string
   difficulty: CoachProgram["difficulty"]
   duration: number
@@ -116,7 +163,10 @@ type WorkoutLogInput = {
 
 export type {
   AssignedTrainee,
+  BodyMetricEntry,
+  CoachCheckIn,
   CoachDashboardData,
+  CoachProgressSummary,
   CoachProgram,
   CoachRequestSummary,
   CoachTrainee,

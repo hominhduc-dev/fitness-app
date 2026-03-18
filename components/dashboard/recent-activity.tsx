@@ -1,10 +1,12 @@
 "use client"
 
-import { CheckCircle2, Clock, Dumbbell } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { enUS, vi } from "date-fns/locale"
-import type { WorkoutLog } from "@/lib/types"
+import { CheckCircle2, Clock, Dumbbell } from "lucide-react"
+
+import { useAuth } from "@/components/providers/auth-provider"
 import { useLocale } from "@/components/providers/locale-provider"
+import type { WorkoutLog } from "@/lib/types"
 
 interface RecentActivityProps {
   logs: WorkoutLog[]
@@ -12,49 +14,52 @@ interface RecentActivityProps {
 
 export function RecentActivity({ logs }: RecentActivityProps) {
   const { locale, messages } = useLocale()
+  const { profile } = useAuth()
+  const weightUnitLabel = profile?.preferredWeightUnit === "lbs" ? "lbs" : "kg"
 
   return (
-    <div className="rounded-[30px] border border-white/80 bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] p-5 shadow-[0_22px_55px_-36px_rgba(15,23,42,0.22)] sm:p-6">
-      <div className="mb-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{messages.dashboard.recentActivity}</p>
-        <h3 className="mt-1 text-xl font-black tracking-tight text-slate-950">{messages.dashboard.recentActivity}</h3>
-      </div>
+    <section className="rounded-[30px] border border-border bg-card p-6 shadow-sm">
+      <h3 className="text-2xl font-black tracking-tight text-foreground">{messages.dashboard.recentActivity}</h3>
 
-      <div className="space-y-4">
+      <div className="mt-6 space-y-4">
         {logs.length === 0 ? (
-          <p className="py-6 text-center text-slate-500">{messages.dashboard.noRecentWorkouts}</p>
+          <p className="py-8 text-center text-muted-foreground">{messages.dashboard.noRecentWorkouts}</p>
         ) : (
           logs.map((log) => (
-            <div key={log.id} className="flex items-start gap-3 rounded-[22px] border border-slate-200/70 bg-white p-3.5 shadow-[0_14px_36px_-30px_rgba(15,23,42,0.16)] sm:gap-4 sm:p-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-success/10">
+            <div key={log.id} className="flex items-start gap-4 rounded-[24px] bg-muted p-4 sm:items-center sm:p-5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-success/10">
                 <CheckCircle2 className="h-5 w-5 text-success" />
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                  <p className="break-words font-semibold text-slate-950 sm:truncate">{log.workout.name}</p>
-                  <span className="shrink-0 text-[11px] text-slate-400 sm:text-xs">
+
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-2xl font-bold tracking-tight text-foreground">{log.workout.name}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        {Math.max(1, Math.round(((log.completedAt?.getTime() || log.startedAt.getTime()) - log.startedAt.getTime()) / 60000))} {messages.dashboard.min}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Dumbbell className="h-3.5 w-3.5" />
+                        {log.exercises.length} {messages.dashboard.exercises}
+                      </span>
+                      {log.totalVolume ? <span>{log.totalVolume.toLocaleString()} {weightUnitLabel}</span> : null}
+                    </div>
+                  </div>
+
+                  <span className="shrink-0 text-sm text-muted-foreground">
                     {formatDistanceToNow(log.completedAt || log.startedAt, {
                       addSuffix: true,
                       locale: locale === "vi" ? vi : enUS,
                     })}
                   </span>
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5" />
-                    {Math.round(((log.completedAt?.getTime() || 0) - log.startedAt.getTime()) / 60000)} {messages.dashboard.min}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Dumbbell className="h-3.5 w-3.5" />
-                    {log.exercises.length} {messages.dashboard.exercises}
-                  </span>
-                  {log.totalVolume && <span>{log.totalVolume.toLocaleString()} {messages.dashboard.lbs}</span>}
-                </div>
               </div>
             </div>
           ))
         )}
       </div>
-    </div>
+    </section>
   )
 }

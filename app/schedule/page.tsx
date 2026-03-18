@@ -10,15 +10,15 @@ export default async function SchedulePage() {
   const workoutData = await fetchWorkouts(accessToken)
 
   return (
-    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-[#f6f6f8] text-foreground md:bg-background">
+    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-background text-foreground">
       <Sidebar role="trainee" />
 
-      <div className="flex min-w-0 flex-1 flex-col bg-[#f6f6f8] md:bg-transparent">
+      <div className="flex min-w-0 flex-1 flex-col">
         <Header />
 
         <main className="flex-1 overflow-x-hidden overflow-y-auto pb-20 md:pb-6">
-          <div className="w-full md:mx-auto md:max-w-[1240px] md:px-8 md:py-8">
-            <WeeklyCalendar recentLogs={workoutData.recentLogs} schedule={workoutData.schedule} />
+          <div className="mx-auto w-full max-w-[1320px] px-4 py-6 md:px-8 md:py-8">
+            <WeeklyCalendar recentLogs={workoutData.recentLogs} schedule={workoutData.schedule} workouts={workoutData.workouts} />
           </div>
         </main>
 

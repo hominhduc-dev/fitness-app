@@ -4,12 +4,45 @@ import { requireCurrentProfile } from "../services/auth.service"
 import {
   createPersonalWorkoutForTrainee,
   createWorkoutLogForTrainee,
+  deletePersonalWorkoutForTrainee,
   getWorkoutDetailForTrainee,
   listWorkoutsForTrainee,
+  updatePersonalWorkoutForTrainee,
 } from "../services/fitness-data.service"
 import { getAccessToken, sendError } from "./route.utils"
 
 const workoutRouter = Router()
+
+function parsePersonalWorkoutInput(body: unknown) {
+  const payload = typeof body === "object" && body !== null ? body : {}
+  const requestBody = payload as {
+    duration?: unknown
+    exercises?: Array<{
+      exerciseId?: unknown
+      reps?: unknown
+      restTime?: unknown
+      sets?: unknown
+    }>
+    name?: unknown
+    notes?: unknown
+    scheduledDay?: unknown
+  }
+
+  return {
+    duration: typeof requestBody.duration === "number" ? requestBody.duration : undefined,
+    exercises: Array.isArray(requestBody.exercises)
+      ? requestBody.exercises.map((exercise) => ({
+          exerciseId: typeof exercise?.exerciseId === "string" ? exercise.exerciseId : "",
+          reps: typeof exercise?.reps === "number" ? exercise.reps : 0,
+          restTime: typeof exercise?.restTime === "number" ? exercise.restTime : undefined,
+          sets: typeof exercise?.sets === "number" ? exercise.sets : 0,
+        }))
+      : [],
+    name: typeof requestBody.name === "string" ? requestBody.name : "",
+    notes: typeof requestBody.notes === "string" ? requestBody.notes : undefined,
+    scheduledDay: typeof requestBody.scheduledDay === "number" ? requestBody.scheduledDay : undefined,
+  }
+}
 
 workoutRouter.get("/", async (req, res) => {
   try {
@@ -38,28 +71,26 @@ workoutRouter.get("/:workoutId", async (req, res) => {
 workoutRouter.post("/", async (req, res) => {
   try {
     const profile = await requireCurrentProfile(getAccessToken(req))
-    const workout = await createPersonalWorkoutForTrainee(profile.profile, {
-      duration: typeof req.body.duration === "number" ? req.body.duration : undefined,
-      exercises:
-        Array.isArray(req.body.exercises)
-          ? (req.body.exercises as Array<{
-              exerciseId?: unknown
-              reps?: unknown
-              restTime?: unknown
-              sets?: unknown
-            }>).map((exercise) => ({
-              exerciseId: typeof exercise?.exerciseId === "string" ? exercise.exerciseId : "",
-              reps: typeof exercise?.reps === "number" ? exercise.reps : 0,
-              restTime: typeof exercise?.restTime === "number" ? exercise.restTime : undefined,
-              sets: typeof exercise?.sets === "number" ? exercise.sets : 0,
-            }))
-          : [],
-      name: typeof req.body.name === "string" ? req.body.name : "",
-      notes: typeof req.body.notes === "string" ? req.body.notes : undefined,
-      scheduledDay: typeof req.body.scheduledDay === "number" ? req.body.scheduledDay : undefined,
-    })
+    const workout = await createPersonalWorkoutForTrainee(profile.profile, parsePersonalWorkoutInput(req.body))
 
     res.status(201).json({
+      workout,
+    })
+  } catch (error) {
+    sendError(res, error)
+  }
+})
+
+workoutRouter.patch("/:workoutId", async (req, res) => {
+  try {
+    const profile = await requireCurrentProfile(getAccessToken(req))
+    const workout = await updatePersonalWorkoutForTrainee(
+      profile.profile,
+      String(req.params.workoutId),
+      parsePersonalWorkoutInput(req.body),
+    )
+
+    res.json({
       workout,
     })
   } catch (error) {
@@ -80,6 +111,17 @@ workoutRouter.post("/:workoutId/logs", async (req, res) => {
     res.status(201).json({
       log,
     })
+  } catch (error) {
+    sendError(res, error)
+  }
+})
+
+workoutRouter.delete("/:workoutId", async (req, res) => {
+  try {
+    const profile = await requireCurrentProfile(getAccessToken(req))
+    const result = await deletePersonalWorkoutForTrainee(profile.profile, String(req.params.workoutId))
+
+    res.json(result)
   } catch (error) {
     sendError(res, error)
   }

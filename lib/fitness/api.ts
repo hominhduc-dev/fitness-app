@@ -3,7 +3,10 @@ import { getApiBaseUrl } from "@/lib/supabase/config"
 import type { DailyNutrition, Exercise, ExerciseSet, Meal, Program, Workout, WorkoutLog } from "@/lib/types"
 
 import type {
+  BodyMetricEntry,
+  CoachCheckIn,
   CoachDashboardData,
+  CoachProgressSummary,
   CoachProgram,
   CoachTrainee,
   CoachTraineeDetail,
@@ -39,6 +42,7 @@ type SerializedWorkout = {
     sets: SerializedExerciseSet[]
   }>
   id: string
+  isPersonal?: boolean
   name: string
   notes?: string
   scheduledDay?: number
@@ -85,7 +89,10 @@ type SerializedCoachTrainee = {
   email: string
   fitnessGoals: string[]
   id: string
+  lastCheckInAt?: string | null
+  latestWeightKg?: number | null
   name: string
+  phone?: string | null
   programCount: number
   thisWeekWorkouts: number
   totalWorkoutLogs: number
@@ -120,6 +127,46 @@ type SerializedCoachRequestCreate = {
     requestStatus: "pending" | "approved" | "rejected"
     traineeId: string
   }
+}
+
+type SerializedBodyMetricEntry = {
+  armCm?: number | null
+  bodyFatPct?: number | null
+  chestCm?: number | null
+  coachId?: string | null
+  coachName?: string | null
+  createdAt: string
+  hipsCm?: number | null
+  id: string
+  note?: string | null
+  recordedAt: string
+  thighCm?: number | null
+  waistCm?: number | null
+  weightKg?: number | null
+}
+
+type SerializedCoachCheckIn = {
+  adherenceScore?: number | null
+  checkInDate: string
+  coachId: string
+  coachName: string
+  createdAt: string
+  energyScore?: number | null
+  feedback: string
+  id: string
+  moodScore?: number | null
+  nextFocus?: string | null
+  recoveryScore?: number | null
+  summary?: string | null
+}
+
+type SerializedCoachProgressSummary = {
+  completionRate: number
+  latestWorkoutAt?: string | null
+  plannedSessionsPerWeek: number
+  totalVolumeLast30Days: number
+  workoutsLast30Days: number
+  workoutsLast7Days: number
 }
 
 type SerializedDailyNutrition = Omit<DailyNutrition, "date" | "meals"> & {
@@ -190,6 +237,7 @@ function mapWorkout(workout: SerializedWorkout): Workout {
       sets: exercise.sets.map(mapExerciseSet),
     })),
     id: workout.id,
+    isPersonal: workout.isPersonal,
     name: workout.name,
     notes: workout.notes,
     scheduledDay: workout.scheduledDay,
@@ -250,10 +298,59 @@ function mapCoachTrainee(trainee: SerializedCoachTrainee): CoachTrainee {
     email: trainee.email,
     fitnessGoals: trainee.fitnessGoals,
     id: trainee.id,
+    lastCheckInAt: toDate(trainee.lastCheckInAt),
+    latestWeightKg: trainee.latestWeightKg ?? undefined,
     name: trainee.name,
+    phone: trainee.phone ?? undefined,
     programCount: trainee.programCount,
     thisWeekWorkouts: trainee.thisWeekWorkouts,
     totalWorkoutLogs: trainee.totalWorkoutLogs,
+  }
+}
+
+function mapBodyMetricEntry(entry: SerializedBodyMetricEntry): BodyMetricEntry {
+  return {
+    armCm: entry.armCm ?? undefined,
+    bodyFatPct: entry.bodyFatPct ?? undefined,
+    chestCm: entry.chestCm ?? undefined,
+    coachId: entry.coachId ?? undefined,
+    coachName: entry.coachName ?? undefined,
+    createdAt: new Date(entry.createdAt),
+    hipsCm: entry.hipsCm ?? undefined,
+    id: entry.id,
+    note: entry.note ?? undefined,
+    recordedAt: new Date(entry.recordedAt),
+    thighCm: entry.thighCm ?? undefined,
+    waistCm: entry.waistCm ?? undefined,
+    weightKg: entry.weightKg ?? undefined,
+  }
+}
+
+function mapCoachCheckIn(entry: SerializedCoachCheckIn): CoachCheckIn {
+  return {
+    adherenceScore: entry.adherenceScore ?? undefined,
+    checkInDate: new Date(entry.checkInDate),
+    coachId: entry.coachId,
+    coachName: entry.coachName,
+    createdAt: new Date(entry.createdAt),
+    energyScore: entry.energyScore ?? undefined,
+    feedback: entry.feedback,
+    id: entry.id,
+    moodScore: entry.moodScore ?? undefined,
+    nextFocus: entry.nextFocus ?? undefined,
+    recoveryScore: entry.recoveryScore ?? undefined,
+    summary: entry.summary ?? undefined,
+  }
+}
+
+function mapCoachProgressSummary(summary: SerializedCoachProgressSummary): CoachProgressSummary {
+  return {
+    completionRate: summary.completionRate,
+    latestWorkoutAt: toDate(summary.latestWorkoutAt),
+    plannedSessionsPerWeek: summary.plannedSessionsPerWeek,
+    totalVolumeLast30Days: summary.totalVolumeLast30Days,
+    workoutsLast30Days: summary.workoutsLast30Days,
+    workoutsLast7Days: summary.workoutsLast7Days,
   }
 }
 
@@ -371,6 +468,21 @@ async function createWorkout(accessToken: string, input: CreateWorkoutInput) {
   return mapWorkout(response.workout)
 }
 
+async function updateWorkout(accessToken: string, workoutId: string, input: CreateWorkoutInput) {
+  const response = await request<{ workout: SerializedWorkout }>(`/api/workouts/${workoutId}`, accessToken, {
+    body: JSON.stringify(input),
+    method: "PATCH",
+  })
+
+  return mapWorkout(response.workout)
+}
+
+async function deleteWorkout(accessToken: string, workoutId: string) {
+  await request<{ deleted: boolean; id: string }>(`/api/workouts/${workoutId}`, accessToken, {
+    method: "DELETE",
+  })
+}
+
 async function createWorkoutLog(accessToken: string, workoutId: string, input: WorkoutLogInput) {
   const response = await request<{ log: SerializedWorkoutLog }>(`/api/workouts/${workoutId}/logs`, accessToken, {
     body: JSON.stringify({
@@ -422,20 +534,33 @@ async function deleteCoachProgram(accessToken: string, programId: string) {
   })
 }
 
-async function fetchCoachTrainees(accessToken: string): Promise<CoachTrainee[]> {
-  const response = await request<{ trainees: SerializedCoachTrainee[] }>("/api/coach/trainees", accessToken)
+async function fetchCoachTrainees(accessToken: string, options?: { phone?: string }): Promise<CoachTrainee[]> {
+  const searchParams = new URLSearchParams()
+
+  if (options?.phone?.trim()) {
+    searchParams.set("phone", options.phone.trim())
+  }
+
+  const query = searchParams.size > 0 ? `?${searchParams.toString()}` : ""
+  const response = await request<{ trainees: SerializedCoachTrainee[] }>(`/api/coach/trainees${query}`, accessToken)
   return response.trainees.map(mapCoachTrainee)
 }
 
 async function fetchCoachTraineeDetail(accessToken: string, traineeId: string): Promise<CoachTraineeDetail> {
   const response = await request<{
+    bodyMetrics: SerializedBodyMetricEntry[]
+    checkIns: SerializedCoachCheckIn[]
     programs: SerializedCoachProgram[]
+    progressSummary: SerializedCoachProgressSummary
     recentLogs: SerializedWorkoutLog[]
     trainee: SerializedCoachTrainee
   }>(`/api/coach/trainees/${traineeId}`, accessToken)
 
   return {
+    bodyMetrics: response.bodyMetrics.map(mapBodyMetricEntry),
+    checkIns: response.checkIns.map(mapCoachCheckIn),
     programs: response.programs.map(mapCoachProgram),
+    progressSummary: mapCoachProgressSummary(response.progressSummary),
     recentLogs: response.recentLogs.map(mapWorkoutLog),
     trainee: mapCoachTrainee(response.trainee),
   }
@@ -504,12 +629,92 @@ async function updateCoachRequestStatus(
   }
 }
 
+async function assignCoachProgram(accessToken: string, programId: string, traineeId: string) {
+  return request<{ assigned: boolean; programId: string; traineeId: string }>(
+    `/api/coach/programs/${programId}/assignments`,
+    accessToken,
+    {
+      body: JSON.stringify({
+        traineeId,
+      }),
+      method: "POST",
+    },
+  )
+}
+
+async function unassignCoachProgram(accessToken: string, programId: string, traineeId: string) {
+  return request<{ deleted: boolean; programId: string; traineeId: string }>(
+    `/api/coach/programs/${programId}/assignments/${traineeId}`,
+    accessToken,
+    {
+      method: "DELETE",
+    },
+  )
+}
+
+async function createCoachBodyMetric(
+  accessToken: string,
+  traineeId: string,
+  input: {
+    armCm?: number
+    bodyFatPct?: number
+    chestCm?: number
+    hipsCm?: number
+    note?: string
+    recordedAt?: string
+    thighCm?: number
+    waistCm?: number
+    weightKg?: number
+  },
+) {
+  const response = await request<{ bodyMetric: SerializedBodyMetricEntry }>(
+    `/api/coach/trainees/${traineeId}/body-metrics`,
+    accessToken,
+    {
+      body: JSON.stringify(input),
+      method: "POST",
+    },
+  )
+
+  return mapBodyMetricEntry(response.bodyMetric)
+}
+
+async function createCoachCheckIn(
+  accessToken: string,
+  traineeId: string,
+  input: {
+    adherenceScore?: number
+    checkInDate?: string
+    energyScore?: number
+    feedback: string
+    moodScore?: number
+    nextFocus?: string
+    recoveryScore?: number
+    summary?: string
+  },
+) {
+  const response = await request<{ checkIn: SerializedCoachCheckIn }>(
+    `/api/coach/trainees/${traineeId}/check-ins`,
+    accessToken,
+    {
+      body: JSON.stringify(input),
+      method: "POST",
+    },
+  )
+
+  return mapCoachCheckIn(response.checkIn)
+}
+
 export {
+  assignCoachProgram,
+  createCoachBodyMetric,
+  createCoachCheckIn,
   createCoachRequest,
   createCoachProgram,
   createMeal,
   createWorkout,
   createWorkoutLog,
+  deleteWorkout,
   deleteMeal,
   deleteCoachProgram,
   fetchDiscoverableCoaches,
@@ -522,7 +727,9 @@ export {
   fetchMeals,
   fetchWorkoutDetail,
   fetchWorkouts,
+  unassignCoachProgram,
   updateCoachProgram,
   updateCoachRequestStatus,
   updateMeal,
+  updateWorkout,
 }

@@ -4,7 +4,7 @@ import type React from "react"
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, Calendar, Dumbbell, Utensils, BarChart3, Users, Settings, ShieldCheck } from "lucide-react"
+import { Home, Calendar, Dumbbell, Utensils, BarChart3, Users, Settings, ShieldCheck, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { AppRole } from "@/lib/auth/types"
 import { useLocale } from "@/components/providers/locale-provider"
@@ -33,6 +33,7 @@ export function MobileNav({ role = "trainee" }: MobileNavProps) {
     { href: "/coach", icon: Home, label: messages.shell.home },
     { href: "/coach/trainees", icon: Users, label: messages.shell.trainees },
     { href: "/coach/programs", icon: Dumbbell, label: messages.shell.programs },
+    { href: "/coach/exercises", icon: Activity, label: "Exercises" },
   ]
   const adminNavItems: NavItem[] = [
     { href: "/admin", icon: ShieldCheck, label: messages.shell.admin },

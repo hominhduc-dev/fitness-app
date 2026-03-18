@@ -11,6 +11,8 @@ import { MobileNav } from "@/components/layout/mobile-nav"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -19,10 +21,11 @@ import {
   createCoachProgram,
   deleteCoachProgram,
   fetchCoachProgram,
+  fetchCoachTrainees,
   fetchExercises,
   updateCoachProgram,
 } from "@/lib/fitness/api"
-import type { CoachProgram } from "@/lib/fitness/types"
+import type { CoachProgram, CoachTrainee } from "@/lib/fitness/types"
 import type { Exercise } from "@/lib/types"
 
 type WorkoutExerciseForm = {
@@ -104,11 +107,14 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
   const [duration, setDuration] = useState("8")
   const [difficulty, setDifficulty] = useState("beginner")
   const [exerciseOptions, setExerciseOptions] = useState<Exercise[]>([])
+  const [traineeOptions, setTraineeOptions] = useState<CoachTrainee[]>([])
+  const [selectedTraineeIds, setSelectedTraineeIds] = useState<string[]>([])
   const [workoutDays, setWorkoutDays] = useState<WorkoutDay[]>([createWorkoutDay(0)])
   const [currentProgram, setCurrentProgram] = useState<CoachProgram | null>(null)
   const [isLoadingPage, setIsLoadingPage] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -127,9 +133,10 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
       setError(null)
 
       try {
-        const [exercises, program] = await Promise.all([
+        const [exercises, program, trainees] = await Promise.all([
           fetchExercises(session.access_token),
           programId ? fetchCoachProgram(session.access_token, programId) : Promise.resolve(null),
+          fetchCoachTrainees(session.access_token),
         ])
 
         if (cancelled) {
@@ -137,6 +144,7 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
         }
 
         setExerciseOptions(exercises)
+        setTraineeOptions(trainees)
 
         if (program) {
           setCurrentProgram(program)
@@ -144,6 +152,7 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
           setDescription(program.description ?? "")
           setDuration(String(program.duration))
           setDifficulty(program.difficulty)
+          setSelectedTraineeIds(program.assignedTo ?? program.assignedTrainees.map((trainee) => trainee.id))
           setWorkoutDays(mapProgramToWorkoutDays(program))
         }
       } catch (loadError) {
@@ -214,7 +223,14 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
     setWorkoutDays((current) => current.filter((day) => day.id !== dayId))
   }
 
+  const toggleTraineeAssignment = (traineeId: string, checked: boolean) => {
+    setSelectedTraineeIds((current) =>
+      checked ? Array.from(new Set([...current, traineeId])) : current.filter((id) => id !== traineeId),
+    )
+  }
+
   const buildProgramPayload = () => ({
+    assignToUserIds: selectedTraineeIds,
     description: description.trim() || undefined,
     difficulty: difficulty as "beginner" | "intermediate" | "advanced",
     duration: Number(duration),
@@ -259,9 +275,8 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
         ? await updateCoachProgram(session.access_token, programId, payload)
         : await createCoachProgram(session.access_token, payload)
 
-      if (programId) {
-        setCurrentProgram(savedProgram)
-      }
+      setCurrentProgram(savedProgram)
+      setSelectedTraineeIds(savedProgram.assignedTo ?? savedProgram.assignedTrainees.map((trainee) => trainee.id))
 
       router.push(`/coach/programs/${savedProgram.id}`)
       router.refresh()
@@ -277,17 +292,12 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
       return
     }
 
-    const confirmed = window.confirm("Delete this program? This will remove all workouts under it.")
-
-    if (!confirmed) {
-      return
-    }
-
     setIsDeleting(true)
     setError(null)
 
     try {
       await deleteCoachProgram(session.access_token, programId)
+      setIsDeleteDialogOpen(false)
       router.push("/coach/programs")
       router.refresh()
     } catch (deleteError) {
@@ -300,6 +310,8 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
   if (isLoadingPage) {
     return <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">Loading program...</div>
   }
+
+  const selectedTrainees = traineeOptions.filter((trainee) => selectedTraineeIds.includes(trainee.id))
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -332,14 +344,14 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
               </div>
             ) : null}
 
-            {currentProgram?.assignedTrainees.length ? (
+            {selectedTrainees.length ? (
               <div className="mb-4 rounded-xl border border-border bg-card p-4 sm:p-6">
                 <div className="flex items-center gap-2 mb-3">
                   <Users className="h-4 w-4 text-muted-foreground" />
-                  <h2 className="text-base font-semibold sm:text-lg">Assigned Trainees</h2>
+                  <h2 className="text-base font-semibold sm:text-lg">Selected Trainees</h2>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  {currentProgram.assignedTrainees.map((trainee) => (
+                  {selectedTrainees.map((trainee) => (
                     <Link
                       key={trainee.id}
                       href={`/coach/trainees/${trainee.id}`}
@@ -423,6 +435,63 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-border bg-card p-4 sm:p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold sm:text-lg">Assign To Trainees</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Select who should receive this program right after saving.
+                    </p>
+                  </div>
+                  <div className="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                    {selectedTraineeIds.length} selected
+                  </div>
+                </div>
+
+                {traineeOptions.length === 0 ? (
+                  <div className="mt-4 rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                    Chưa có trainee nào được kết nối với coach này.
+                  </div>
+                ) : (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {traineeOptions.map((trainee) => {
+                      const isChecked = selectedTraineeIds.includes(trainee.id)
+
+                      return (
+                        <label
+                          key={trainee.id}
+                          className={`flex cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                            isChecked
+                              ? "border-primary/40 bg-primary/5"
+                              : "border-border bg-muted/20 hover:border-primary/20"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={(checked) => toggleTraineeAssignment(trainee.id, Boolean(checked))}
+                            className="mt-0.5"
+                          />
+                          <Avatar className="h-10 w-10 border border-primary/20">
+                            <AvatarImage src={trainee.avatar || "/placeholder.svg"} />
+                            <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                              {getInitials(trainee.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold">{trainee.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">{trainee.email}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {trainee.thisWeekWorkouts} workouts this week
+                              {trainee.latestWeightKg != null ? ` • ${trainee.latestWeightKg} kg` : ""}
+                            </p>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="rounded-xl border border-border bg-card p-4 sm:p-6">
@@ -638,7 +707,7 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
                   <Button
                     variant="outline"
                     className="w-full sm:w-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => void handleDeleteProgram()}
+                    onClick={() => setIsDeleteDialogOpen(true)}
                     disabled={isDeleting || isSaving}
                   >
                     {isDeleting ? "Deleting..." : "Delete Program"}
@@ -657,6 +726,30 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
             </div>
           </div>
         </main>
+
+        <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete this program?</DialogTitle>
+              <DialogDescription>
+                This will permanently remove the program and all workout days inside it. This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+
+            <DialogFooter>
+              <Button variant="outline" className="bg-transparent" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void handleDeleteProgram()}
+                disabled={isDeleting}
+              >
+                {isDeleting ? "Deleting..." : "Delete Program"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <MobileNav role="coach" />
       </div>

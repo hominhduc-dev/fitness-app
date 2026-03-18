@@ -4,7 +4,7 @@ import type React from "react"
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Bell, Settings, Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -31,6 +31,7 @@ export function Header({ showMenu, onMenuClick }: HeaderProps) {
   const { isLoading, profile, signOut } = useAuth()
   const { messages } = useLocale()
   const [isSigningOut, setIsSigningOut] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
   const dashboardHref = getRoleLandingPath(profile?.role)
   const displayName = profile?.name ?? messages.shell.yeahBuddyUser
   const displayEmail = profile?.email ?? messages.shell.loadingEmail
@@ -40,6 +41,10 @@ export function Header({ showMenu, onMenuClick }: HeaderProps) {
     .map((segment) => segment[0])
     .join("")
     .slice(0, 2)
+
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   const handleSignOut = async () => {
     setIsSigningOut(true)
@@ -77,40 +82,49 @@ export function Header({ showMenu, onMenuClick }: HeaderProps) {
             <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />
           </Button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-9 w-9 rounded-full" disabled={isLoading}>
-                <Avatar className="h-9 w-9 border-2 border-primary/20">
-                  <AvatarImage src={profile?.avatar || "/placeholder.svg"} alt={displayName} />
-                  <AvatarFallback className="bg-primary/10 text-primary">{initials || "YB"}</AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>
-                <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium">{displayName}</p>
-                  <p className="text-xs text-muted-foreground">{displayEmail}</p>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/profile">
-                  <Settings className="mr-2 h-4 w-4" />
-                  {messages.common.settings}
-                </Link>
-              </DropdownMenuItem>
-              {profile?.role === "trainee" && (
+          {isMounted ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="relative h-9 w-9 rounded-full" disabled={isLoading}>
+                  <Avatar className="h-9 w-9 border-2 border-primary/20">
+                    <AvatarImage src={profile?.avatar || "/placeholder.svg"} alt={displayName} />
+                    <AvatarFallback className="bg-primary/10 text-primary">{initials || "YB"}</AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium">{displayName}</p>
+                    <p className="text-xs text-muted-foreground">{displayEmail}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href="/coach/find">{messages.common.addCoach}</Link>
+                  <Link href="/profile">
+                    <Settings className="mr-2 h-4 w-4" />
+                    {messages.common.settings}
+                  </Link>
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => void handleSignOut()} disabled={isSigningOut}>
-                {isSigningOut ? messages.common.signingOut : messages.common.signOut}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {profile?.role === "trainee" && (
+                  <DropdownMenuItem asChild>
+                    <Link href="/coach/find">{messages.common.addCoach}</Link>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => void handleSignOut()} disabled={isSigningOut}>
+                  {isSigningOut ? messages.common.signingOut : messages.common.signOut}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button variant="ghost" className="relative h-9 w-9 rounded-full" disabled>
+              <Avatar className="h-9 w-9 border-2 border-primary/20">
+                <AvatarImage src={profile?.avatar || "/placeholder.svg"} alt={displayName} />
+                <AvatarFallback className="bg-primary/10 text-primary">{initials || "YB"}</AvatarFallback>
+              </Avatar>
+            </Button>
+          )}
         </div>
       </div>
     </header>

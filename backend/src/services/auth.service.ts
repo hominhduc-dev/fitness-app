@@ -1,4 +1,4 @@
-import { Prisma, UserRole, type User as AppUser } from "@prisma/client"
+import { Prisma, UserRole, WeightUnit, type User as AppUser } from "@prisma/client"
 import type { Session, User as SupabaseUser } from "@supabase/supabase-js"
 
 import { env } from "../config/env"
@@ -44,6 +44,9 @@ class AuthServiceError extends Error {
 }
 
 const USERNAME_PATTERN = /^(?=.{3,30}$)[a-z0-9](?:[a-z0-9._]*[a-z0-9])?$/
+const DEFAULT_DAILY_CALORIE_GOAL = 2500
+const MIN_DAILY_CALORIE_GOAL = 500
+const MAX_DAILY_CALORIE_GOAL = 10000
 
 function fallbackNameFromEmail(email?: string | null) {
   if (!email) {
@@ -138,6 +141,38 @@ function normalizePhoneNumber(value?: string | null) {
   return `+${digitsOnly}`
 }
 
+function normalizeWeightUnit(value?: string | null) {
+  if (!value) {
+    return WeightUnit.kg
+  }
+
+  if (value === WeightUnit.kg || value === WeightUnit.lbs) {
+    return value
+  }
+
+  throw new AuthServiceError("Đơn vị cân nặng không hợp lệ.")
+}
+
+function normalizeDailyCalorieGoal(value?: number | null) {
+  if (value == null) {
+    return DEFAULT_DAILY_CALORIE_GOAL
+  }
+
+  if (!Number.isFinite(value)) {
+    throw new AuthServiceError("Mục tiêu calories mỗi ngày không hợp lệ.")
+  }
+
+  const rounded = Math.round(value)
+
+  if (rounded < MIN_DAILY_CALORIE_GOAL || rounded > MAX_DAILY_CALORIE_GOAL) {
+    throw new AuthServiceError(
+      `Mục tiêu calories mỗi ngày phải nằm trong khoảng ${MIN_DAILY_CALORIE_GOAL}-${MAX_DAILY_CALORIE_GOAL}.`,
+    )
+  }
+
+  return rounded
+}
+
 function looksLikeEmail(value: string) {
   return value.includes("@")
 }
@@ -197,14 +232,6 @@ function ensureAuthClient() {
   return supabasePublic
 }
 
-function ensureAdminClient() {
-  if (!supabaseAdmin) {
-    throw new AuthServiceError("Supabase admin client is not configured.", 500)
-  }
-
-  return supabaseAdmin
-}
-
 function serializeSession(session: Session | null): SerializableSession | null {
   if (!session) {
     return null
@@ -239,15 +266,41 @@ function serializeProfile(profile: AppUser | null) {
     avatar: profile.avatar,
     coachId: profile.coachId,
     createdAt: profile.createdAt,
+    dailyCalorieGoal: profile.dailyCalorieGoal,
     email: profile.email,
     fitnessGoals: profile.fitnessGoals,
     id: profile.id,
+    isActive: profile.isActive,
     name: profile.name,
     phone: profile.phone,
+    preferredWeightUnit: profile.preferredWeightUnit,
     role: profile.role,
     supabaseAuthUserId: profile.supabaseAuthUserId,
     updatedAt: profile.updatedAt,
     username: profile.username,
+  }
+}
+
+function getRegistrationRedirectUrl(redirectTo?: string) {
+  return redirectTo ?? `${env.frontendUrl}/auth/callback`
+}
+
+function getPasswordResetRedirectUrl(redirectTo?: string) {
+  return redirectTo ?? `${env.frontendUrl}/auth/callback?next=/reset-password`
+}
+
+function getPasswordResetSuccessResult() {
+  return {
+    message: "Email đặt lại mật khẩu đã được gửi nếu tài khoản tồn tại.",
+    profile: null,
+    session: null,
+    user: null,
+  } satisfies AuthResult
+}
+
+function assertProfileIsActive(profile: Pick<AppUser, "isActive">) {
+  if (!profile.isActive) {
+    throw new AuthServiceError("Tài khoản này đã bị khoá. Vui lòng liên hệ quản trị viên.", 403)
   }
 }
 
@@ -294,10 +347,12 @@ async function syncProfile(authUser: SupabaseUser, overrides?: {
     return prisma.user.update({
       data: {
         avatar: avatar ?? existingProfile.avatar,
+        dailyCalorieGoal: existingProfile.dailyCalorieGoal,
         email,
         fitnessGoals: existingProfile.fitnessGoals.length > 0 ? existingProfile.fitnessGoals : metadataGoals,
         name,
         phone: phone ?? existingProfile.phone,
+        preferredWeightUnit: existingProfile.preferredWeightUnit,
         role: nextRole,
         supabaseAuthUserId: authUser.id,
         username: username ?? existingProfile.username,
@@ -478,7 +533,7 @@ async function registerUser(input: {
         role: normalizePublicRole(input.role),
         username,
       },
-      emailRedirectTo: input.redirectTo ?? `${env.frontendUrl}/auth/callback`,
+      emailRedirectTo: getRegistrationRedirectUrl(input.redirectTo),
     },
   })
 
@@ -517,6 +572,10 @@ async function loginUser(input: { identifier: string; password: string }) {
 
   const profile = await syncProfile(data.user)
 
+  if (profile) {
+    assertProfileIsActive(profile)
+  }
+
   return {
     message: "Đăng nhập thành công.",
     profile: serializeProfile(profile),
@@ -538,6 +597,10 @@ async function refreshAuthSession(input: { accessToken?: string; refreshToken: s
 
   const profile = await syncProfile(data.user)
 
+  if (profile) {
+    assertProfileIsActive(profile)
+  }
+
   return {
     message: "Phiên đăng nhập đã được làm mới.",
     profile: serializeProfile(profile),
@@ -549,6 +612,10 @@ async function refreshAuthSession(input: { accessToken?: string; refreshToken: s
 async function getCurrentProfile(accessToken: string) {
   const user = await getVerifiedUser(accessToken)
   const profile = await syncProfile(user)
+
+  if (profile) {
+    assertProfileIsActive(profile)
+  }
 
   return {
     profile: serializeProfile(profile),
@@ -565,6 +632,8 @@ async function requireCurrentProfile(accessToken: string): Promise<Authenticated
     throw new AuthServiceError("Không tìm thấy hồ sơ người dùng.", 404)
   }
 
+  assertProfileIsActive(profile)
+
   return {
     authUser,
     profile: serializeProfile(profile) as SerializedProfile,
@@ -575,8 +644,11 @@ async function updateCurrentProfile(
   accessToken: string,
   updates: {
     avatar?: string | null
+    dailyCalorieGoal?: number | null
     fitnessGoals?: string[]
     name?: string | null
+    phone?: string | null
+    preferredWeightUnit?: string | null
   },
 ) {
   const authUser = await getVerifiedUser(accessToken)
@@ -596,12 +668,47 @@ async function updateCurrentProfile(
   const nextGoals = Array.isArray(updates.fitnessGoals)
     ? updates.fitnessGoals.map((goal) => goal.trim()).filter(Boolean)
     : profile.fitnessGoals
+  const hasPhoneUpdate = updates.phone !== undefined
+  const hasDailyCalorieGoalUpdate = updates.dailyCalorieGoal !== undefined
+  const hasWeightUnitUpdate = updates.preferredWeightUnit !== undefined
+  const nextPhone = hasPhoneUpdate
+    ? updates.phone === null || updates.phone?.trim() === ""
+      ? null
+      : normalizePhoneNumber(updates.phone)
+    : profile.phone
+  const nextDailyCalorieGoal = hasDailyCalorieGoalUpdate
+    ? normalizeDailyCalorieGoal(updates.dailyCalorieGoal)
+    : profile.dailyCalorieGoal
+  const nextWeightUnit = hasWeightUnitUpdate
+    ? normalizeWeightUnit(updates.preferredWeightUnit)
+    : profile.preferredWeightUnit
+
+  if (nextPhone) {
+    const existingPhoneOwner = await prisma.user.findFirst({
+      select: {
+        id: true,
+      },
+      where: {
+        id: {
+          not: profile.id,
+        },
+        phone: nextPhone,
+      },
+    })
+
+    if (existingPhoneOwner) {
+      throw new AuthServiceError("Số điện thoại này đã được sử dụng.")
+    }
+  }
 
   const updatedProfile = await prisma.user.update({
     data: {
       avatar: nextAvatar,
+      dailyCalorieGoal: nextDailyCalorieGoal,
       fitnessGoals: nextGoals,
       name: nextName,
+      phone: nextPhone,
+      preferredWeightUnit: nextWeightUnit,
     },
     where: {
       id: profile.id,
@@ -613,9 +720,12 @@ async function updateCurrentProfile(
       user_metadata: {
         ...authUser.user_metadata,
         avatar_url: nextAvatar ?? undefined,
+        dailyCalorieGoal: nextDailyCalorieGoal,
         fitnessGoals: nextGoals,
         full_name: nextName,
         name: nextName,
+        phone: nextPhone ?? undefined,
+        preferredWeightUnit: nextWeightUnit,
       },
     })
 
@@ -633,23 +743,34 @@ async function updateCurrentProfile(
 }
 
 async function requestPasswordReset(input: { email: string; redirectTo?: string }) {
-  const client = ensureAuthClient()
-  const email = await resolveLoginEmail(input.email)
+  let email: string
 
-  const { error } = await client.auth.resetPasswordForEmail(email, {
-    redirectTo: input.redirectTo ?? `${env.frontendUrl}/auth/callback?next=/reset-password`,
-  })
+  try {
+    email = await resolveLoginEmail(input.email)
+  } catch (error) {
+    if (error instanceof AuthServiceError && error.status === 401) {
+      return getPasswordResetSuccessResult()
+    }
 
-  if (error) {
-    throw new AuthServiceError(error.message, 400)
+    throw error
   }
 
-  return {
-    message: "Email đặt lại mật khẩu đã được gửi nếu tài khoản tồn tại.",
-    profile: null,
-    session: null,
-    user: null,
-  } satisfies AuthResult
+  const redirectTo = getPasswordResetRedirectUrl(input.redirectTo)
+  const client = ensureAuthClient()
+
+  async function sendWithSupabase() {
+    const { error } = await client.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    })
+
+    if (error) {
+      throw new AuthServiceError(error.message, 400)
+    }
+
+    return getPasswordResetSuccessResult()
+  }
+
+  return sendWithSupabase()
 }
 
 async function logoutCurrentSession(accessToken: string) {

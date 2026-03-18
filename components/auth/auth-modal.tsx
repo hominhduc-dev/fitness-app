@@ -3,7 +3,6 @@
 import type React from "react"
 
 import { startTransition, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
 import { Eye, EyeOff, Mail, Lock, User, ArrowRight, Loader2, X, AlertCircle, CheckCircle, Phone } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -73,7 +72,6 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login", redirectTo
   const [registerPassword, setRegisterPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [acceptTerms, setAcceptTerms] = useState(false)
-  const router = useRouter()
   const finalRedirectPath = sanitizeRedirectPath(redirectToPath)
 
   useEffect(() => {
@@ -111,6 +109,19 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login", redirectTo
     if (sessionError) {
       throw sessionError
     }
+
+    const {
+      data: { session: currentSession },
+      error: getSessionError,
+    } = await supabase.auth.getSession()
+
+    if (getSessionError) {
+      throw getSessionError
+    }
+
+    if (!currentSession?.access_token) {
+      throw new Error(messages.auth.backendMissingSession)
+    }
   }
 
   async function finalizeAuthentication(role?: AppRole | null, session?: { accessToken: string; refreshToken: string } | null) {
@@ -122,9 +133,7 @@ export function AuthModal({ open, onOpenChange, defaultTab = "login", redirectTo
       window.localStorage.removeItem(REMEMBERED_IDENTIFIER_KEY)
     }
 
-    onOpenChange(false)
-    router.push(finalRedirectPath ?? getRoleLandingPath(role))
-    router.refresh()
+    window.location.replace(finalRedirectPath ?? getRoleLandingPath(role))
   }
 
   const handleLogin = async (event: React.FormEvent) => {

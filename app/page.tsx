@@ -1,6 +1,7 @@
 import type React from "react"
 
 import Link from "next/link"
+import { redirect } from "next/navigation"
 import {
   Activity,
   Apple,
@@ -18,6 +19,8 @@ import {
 import { AuthModalLauncher } from "@/components/auth/auth-modal-launcher"
 import { LocaleToggle } from "@/components/locale/locale-toggle"
 import { Button } from "@/components/ui/button"
+import { getRoleLandingPath } from "@/lib/auth/roles"
+import { getServerAuthState } from "@/lib/auth/server"
 import { getServerLocale, getServerMessages } from "@/lib/i18n/server"
 
 const scheduleDays = [
@@ -34,6 +37,12 @@ const exerciseItems = [
 ]
 
 export default async function Home() {
+  const authState = await getServerAuthState()
+
+  if (authState.accessToken && authState.profile) {
+    redirect(getRoleLandingPath(authState.profile.role))
+  }
+
   const [locale, messages] = await Promise.all([getServerLocale(), getServerMessages()])
   const featureItems = [
     {
@@ -78,45 +87,30 @@ export default async function Home() {
         <div className="absolute inset-x-0 top-0 -z-10 h-[680px] bg-[linear-gradient(to_right,rgba(19,73,236,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(19,73,236,0.05)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(180deg,white,rgba(255,255,255,0))]" />
         <div className="absolute left-1/2 top-28 -z-10 h-72 w-72 -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]" />
 
-        <header className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 sm:py-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary shadow-[0_18px_40px_-18px_rgba(19,73,236,0.9)]">
+        <header className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary shadow-[0_18px_40px_-18px_rgba(19,73,236,0.9)] sm:h-12 sm:w-12">
               <DumbbellIcon className="h-5 w-5 text-primary-foreground" />
             </div>
             <div className="min-w-0">
-              <div className="truncate text-xl font-black tracking-tight sm:text-2xl">YeahBuddy</div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground sm:text-xs sm:tracking-[0.28em]">
+              <div className="truncate text-lg font-black tracking-tight sm:text-2xl">YeahBuddy</div>
+              <div className="hidden text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground sm:block">
                 Performance OS
               </div>
             </div>
           </div>
 
-          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
-            <div className="sm:hidden">
-              <LocaleToggle compact />
-            </div>
-            <div className="hidden sm:block">
-              <LocaleToggle />
-            </div>
-            <div className="flex flex-1 items-center justify-end gap-2 rounded-full border border-white/70 bg-white/80 p-1.5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] backdrop-blur sm:flex-none">
-              <Button
-                asChild
-                variant="ghost"
-                className="rounded-full px-3 text-sm font-semibold transition-colors hover:bg-primary/10 hover:text-primary sm:px-5"
-              >
-                <Link href="/?auth=login" scroll={false}>
-                  {messages.auth.login}
-                </Link>
-              </Button>
-              <Button
-                asChild
-                className="rounded-full px-3 text-sm font-semibold transition-transform duration-300 hover:-translate-y-0.5 sm:px-5"
-              >
-                <Link href="/?auth=register" scroll={false}>
-                  {messages.landing.finalPrimaryCta}
-                </Link>
-              </Button>
-            </div>
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <LocaleToggle compact />
+            <Button
+              asChild
+              variant="ghost"
+              className="h-10 rounded-full border border-white/70 bg-white/80 px-3 text-sm font-semibold shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] backdrop-blur transition-colors hover:bg-primary/10 hover:text-primary sm:px-5"
+            >
+              <Link href="/?auth=login" scroll={false}>
+                {messages.auth.login}
+              </Link>
+            </Button>
           </div>
         </header>
 

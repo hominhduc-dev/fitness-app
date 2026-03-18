@@ -31,13 +31,13 @@ npm run start
 npm run prisma:validate
 ```
 
-4. Generate Prisma client:
+5. Generate Prisma client:
 
 ```bash
 npm run prisma:generate
 ```
 
-5. Push the schema to Supabase Postgres:
+6. Push the schema to Supabase Postgres:
 
 ```bash
 npm run prisma:push
@@ -57,3 +57,8 @@ npm run prisma:studio
 - `GET /api/health`
 - `GET /api/health/database`
 - `GET /api/health/supabase`
+
+## Auth Email Delivery
+
+- Signup confirmation and forgot-password emails are sent by Supabase.
+- If you need custom SMTP, configure it in your Supabase project instead of this backend.

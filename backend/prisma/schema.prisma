@@ -33,6 +33,11 @@ enum CoachRequestStatus {
   rejected
 }
 
+enum WeightUnit {
+  kg
+  lbs
+}
+
 enum FoodSource {
   system
   user
@@ -69,20 +74,29 @@ model User {
   username               String?             @unique
   phone                  String?             @unique
   role                   UserRole
+  isActive               Boolean             @default(true)
   avatar                 String?
   fitnessGoals           String[]            @default([])
+  preferredWeightUnit    WeightUnit          @default(kg)
+  dailyCalorieGoal       Int                 @default(2500)
   coachId                String?             @db.Uuid
   coach                  User?               @relation("CoachTrainees", fields: [coachId], references: [id], onDelete: SetNull)
   trainees               User[]              @relation("CoachTrainees")
   meals                  Meal[]
+  exercisesCreated       Exercise[]          @relation("ExerciseCreator")
   foodsCreated           Food[]              @relation("FoodCreator")
   recipesCreated         Recipe[]            @relation("RecipeCreator")
   notifications          Notification[]
   programsCreated        Program[]           @relation("ProgramCreator")
   programAssignments     ProgramAssignment[]
   workoutLogs            WorkoutLog[]
+  bodyMetricsAsTrainee   BodyMetricEntry[]   @relation("BodyMetricTrainee")
+  bodyMetricsAsCoach     BodyMetricEntry[]   @relation("BodyMetricCoach")
+  checkInsAsTrainee      CoachCheckIn[]      @relation("CoachCheckInTrainee")
+  checkInsAsCoach        CoachCheckIn[]      @relation("CoachCheckInCoach")
   coachRequestsAsCoach   CoachRequest[]      @relation("CoachRequestCoach")
   coachRequestsAsTrainee CoachRequest[]      @relation("CoachRequestTrainee")
+  adminAuditLogs         AdminAuditLog[]     @relation("AdminAuditActor")
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
@@ -96,9 +110,13 @@ model Exercise {
   name             String
   muscleGroup      String
   equipment        String?
+  createdById      String?           @db.Uuid
+  createdBy        User?             @relation("ExerciseCreator", fields: [createdById], references: [id], onDelete: SetNull)
   workoutExercises WorkoutExercise[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+
+  @@index([createdById])
 }
 
 model Food {
@@ -261,6 +279,49 @@ model WorkoutLog {
   @@index([workoutId])
 }
 
+model BodyMetricEntry {
+  id         String   @id @default(uuid()) @db.Uuid
+  traineeId  String   @db.Uuid
+  coachId    String?  @db.Uuid
+  recordedAt DateTime @default(now())
+  weightKg   Float?
+  bodyFatPct Float?
+  chestCm    Float?
+  waistCm    Float?
+  hipsCm     Float?
+  armCm      Float?
+  thighCm    Float?
+  note       String?
+  trainee    User     @relation("BodyMetricTrainee", fields: [traineeId], references: [id], onDelete: Cascade)
+  coach      User?    @relation("BodyMetricCoach", fields: [coachId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([traineeId, recordedAt])
+  @@index([coachId])
+}
+
+model CoachCheckIn {
+  id             String   @id @default(uuid()) @db.Uuid
+  traineeId      String   @db.Uuid
+  coachId        String   @db.Uuid
+  checkInDate    DateTime @default(now())
+  adherenceScore Int?
+  energyScore    Int?
+  recoveryScore  Int?
+  moodScore      Int?
+  summary        String?
+  feedback       String
+  nextFocus      String?
+  trainee        User     @relation("CoachCheckInTrainee", fields: [traineeId], references: [id], onDelete: Cascade)
+  coach          User     @relation("CoachCheckInCoach", fields: [coachId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([traineeId, checkInDate])
+  @@index([coachId, createdAt])
+}
+
 model Meal {
   id         String   @id @default(uuid()) @db.Uuid
   userId     String   @db.Uuid
@@ -339,4 +400,19 @@ model Notification {
 
   @@index([userId, status, scheduledFor])
   @@index([relatedEntityType, relatedEntityId])
+}
+
+model AdminAuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  adminId     String   @db.Uuid
+  action      String
+  entityType  String
+  entityId    String?  @db.Uuid
+  entityLabel String?
+  metadata    Json?
+  admin       User     @relation("AdminAuditActor", fields: [adminId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@index([adminId, createdAt])
+  @@index([entityType, createdAt])
 }

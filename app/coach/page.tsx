@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Calendar, ChevronRight, Users } from "lucide-react"
+import { Calendar, ChevronRight, Users, Dumbbell } from "lucide-react"
 
 import { Header } from "@/components/layout/header"
 import { MobileNav } from "@/components/layout/mobile-nav"
@@ -119,6 +119,12 @@ export default async function CoachDashboardPage() {
                       <Button variant="outline" className="w-full justify-start gap-2 bg-transparent text-sm">
                         <Users className="h-4 w-4" />
                         {messages.coach.viewAllTrainees}
+                      </Button>
+                    </Link>
+                    <Link href="/coach/exercises">
+                      <Button variant="outline" className="w-full justify-start gap-2 bg-transparent text-sm">
+                        <Dumbbell className="h-4 w-4" />
+                        Exercise Library
                       </Button>
                     </Link>
                   </div>

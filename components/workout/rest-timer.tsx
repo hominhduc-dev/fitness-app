@@ -58,12 +58,12 @@ export function RestTimer({ defaultTime = 90, onComplete }: RestTimerProps) {
   const progress = (timeLeft / initialTime) * 100
 
   return (
-    <div className="sticky top-16 z-10 border-b border-border bg-card/95 backdrop-blur-sm py-3 px-4 md:px-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="lg:sticky lg:top-24 lg:rounded-xl border border-border bg-card/95 backdrop-blur-sm py-3 px-4 md:px-6 md:border-b lg:border-b-0">
+      <div className="flex items-center justify-between gap-4 lg:flex-col lg:items-start">
         {/* Left: Timer Circle and Time */}
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <div className="relative h-16 w-16 flex-shrink-0">
-            <svg className="h-16 w-16 -rotate-90 transform">
+        <div className="flex items-center gap-3 flex-shrink-0 lg:flex-col lg:w-full">
+          <div className="relative h-16 w-16 flex-shrink-0 lg:h-20 lg:w-20">
+            <svg className="h-16 w-16 lg:h-20 lg:w-20 -rotate-90 transform">
               <circle
                 cx="32"
                 cy="32"
@@ -71,7 +71,7 @@ export function RestTimer({ defaultTime = 90, onComplete }: RestTimerProps) {
                 stroke="currentColor"
                 strokeWidth="6"
                 fill="transparent"
-                className="text-muted"
+                className="text-muted lg:r-36 lg:cx-40 lg:cy-40"
               />
               <circle
                 cx="32"
@@ -91,9 +91,9 @@ export function RestTimer({ defaultTime = 90, onComplete }: RestTimerProps) {
               </span>
             </div>
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 lg:w-full">
             <h3 className="text-sm font-medium text-foreground">Rest Timer</h3>
-            <div className="flex gap-1">
+            <div className="flex gap-1 lg:w-full">
               <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => adjustTime(-15)}>
                 <Minus className="h-3 w-3" />
               </Button>
@@ -105,13 +105,10 @@ export function RestTimer({ defaultTime = 90, onComplete }: RestTimerProps) {
         </div>
 
         {/* Right: Controls */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Button variant="outline" size="icon" className="h-9 w-9 bg-transparent" onClick={resetTimer}>
-            <RotateCcw className="h-4 w-4" />
-          </Button>
-          <Button
+        <div className="flex items-center gap-2 flex-shrink-0 lg:w-full lg:flex-col">
+          <Button 
             className={cn(
-              "h-10 px-4 gap-2 text-sm",
+              "h-10 px-4 gap-2 text-sm lg:w-full",
               isRunning ? "bg-accent hover:bg-accent/90" : "bg-primary hover:bg-primary/90",
             )}
             onClick={toggleTimer}
@@ -127,6 +124,9 @@ export function RestTimer({ defaultTime = 90, onComplete }: RestTimerProps) {
                 <span className="hidden sm:inline">Start</span>
               </>
             )}
+          </Button>
+          <Button variant="outline" size="icon" className="h-9 w-9 bg-transparent lg:w-full lg:h-10" onClick={resetTimer}>
+            <RotateCcw className="h-4 w-4" />
           </Button>
         </div>
       </div>

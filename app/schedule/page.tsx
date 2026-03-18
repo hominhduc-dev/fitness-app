@@ -1,14 +1,65 @@
 "use client"
 
+import { useState } from "react"
 import { Header } from "@/components/layout/header"
 import { Sidebar } from "@/components/layout/sidebar"
 import { MobileNav } from "@/components/layout/mobile-nav"
 import { WeeklyCalendar } from "@/components/schedule/weekly-calendar"
+import { AddWorkoutDialog } from "@/components/schedule/add-workout-dialog"
 import { weeklySchedule, sampleWorkouts } from "@/lib/mock-data"
 import { Button } from "@/components/ui/button"
 import { Plus, Copy } from "lucide-react"
+import type { Workout, WeeklySchedule } from "@/lib/types"
 
 export default function SchedulePage() {
+  const [schedule, setSchedule] = useState<WeeklySchedule>(weeklySchedule)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [selectedDay, setSelectedDay] = useState<number | null>(null)
+
+  const handleAddWorkout = (day: number) => {
+    setSelectedDay(day)
+    setDialogOpen(true)
+  }
+
+  const handleCreateWorkout = (workout: Workout, day: number) => {
+    setSchedule((prev) => ({
+      ...prev,
+      [day]: workout,
+    }))
+    setDialogOpen(false)
+  }
+
+  const handleSelectTemplate = (workout: Workout, day: number) => {
+    setSchedule((prev) => ({
+      ...prev,
+      [day]: workout,
+    }))
+    setDialogOpen(false)
+  }
+
+  const handleEditWorkout = (workout: Workout, day: number) => {
+    // For now, just open dialog to replace
+    setSelectedDay(day)
+    setDialogOpen(true)
+  }
+
+  const handleDeleteWorkout = (day: number) => {
+    setSchedule((prev) => ({
+      ...prev,
+      [day]: null,
+    }))
+  }
+
+  const handleCopyWeek = () => {
+    // Create a new week with the same workouts
+    const newSchedule: WeeklySchedule = {}
+    Object.keys(schedule).forEach((dayStr) => {
+      const day = parseInt(dayStr)
+      newSchedule[day] = schedule[day]
+    })
+    setSchedule(newSchedule)
+  }
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar role="trainee" />
@@ -25,11 +76,14 @@ export default function SchedulePage() {
                 <p className="mt-1 text-muted-foreground">Plan and organize your training week</p>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" className="gap-2 bg-transparent">
+                <Button variant="outline" className="gap-2 bg-transparent" onClick={handleCopyWeek}>
                   <Copy className="h-4 w-4" />
                   Copy Week
                 </Button>
-                <Button className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground">
+                <Button 
+                  className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground"
+                  onClick={() => handleAddWorkout(new Date().getDay())}
+                >
                   <Plus className="h-4 w-4" />
                   New Workout
                 </Button>
@@ -38,10 +92,10 @@ export default function SchedulePage() {
 
             {/* Weekly Calendar */}
             <WeeklyCalendar
-              schedule={weeklySchedule}
-              onAddWorkout={(day) => console.log("Add workout for day", day)}
-              onEditWorkout={(workout, day) => console.log("Edit workout", workout, "for day", day)}
-              onDeleteWorkout={(day) => console.log("Delete workout for day", day)}
+              schedule={schedule}
+              onAddWorkout={handleAddWorkout}
+              onEditWorkout={handleEditWorkout}
+              onDeleteWorkout={handleDeleteWorkout}
             />
 
             {/* Workout Templates */}
@@ -52,6 +106,10 @@ export default function SchedulePage() {
                   <div
                     key={workout.id}
                     className="group rounded-xl border border-border bg-card p-4 transition-all hover:border-primary/30 cursor-pointer"
+                    onClick={() => {
+                      setSelectedDay(null)
+                      setDialogOpen(true)
+                    }}
                   >
                     <div className="flex items-start justify-between">
                       <div>
@@ -60,7 +118,7 @@ export default function SchedulePage() {
                           {workout.exercises.length} exercises · {workout.duration} min
                         </p>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => e.stopPropagation()}>
                         <Plus className="h-4 w-4" />
                       </Button>
                     </div>
@@ -79,6 +137,18 @@ export default function SchedulePage() {
         </main>
 
         <MobileNav role="trainee" />
+
+        {/* Add Workout Dialog */}
+        <AddWorkoutDialog
+          open={dialogOpen}
+          selectedDay={selectedDay}
+          onClose={() => {
+            setDialogOpen(false)
+            setSelectedDay(null)
+          }}
+          onSubmit={handleCreateWorkout}
+          onSelectTemplate={handleSelectTemplate}
+        />
       </div>
     </div>
   )

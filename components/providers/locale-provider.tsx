@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useMemo, useState } from "react"
+import { createContext, useContext, useEffect, useMemo, useState } from "react"
 
 import { defaultLocale, localeCookieName, type AppLocale } from "@/lib/i18n/config"
 import { getMessages, type AppMessages } from "@/lib/i18n/messages"
@@ -22,6 +22,10 @@ export function LocaleProvider({
 }) {
   const [locale, setLocaleState] = useState<AppLocale>(initialLocale)
 
+  useEffect(() => {
+    document.documentElement.lang = locale
+  }, [locale])
+
   const value = useMemo<LocaleContextValue>(
     () => ({
       locale,
@@ -29,7 +33,6 @@ export function LocaleProvider({
       setLocale: (nextLocale) => {
         setLocaleState(nextLocale)
         document.cookie = `${localeCookieName}=${nextLocale}; path=/; max-age=31536000; SameSite=Lax`
-        document.documentElement.lang = nextLocale
       },
     }),
     [locale],

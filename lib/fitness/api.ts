@@ -63,6 +63,7 @@ type SerializedExerciseSet = {
   }
   rir?: number
   setNumber: number
+  targetRepsMin?: number
   targetReps: number
   weight?: number
 }
@@ -86,6 +87,7 @@ type SerializedWorkout = {
   name: string
   notes?: string
   scheduledDay?: number
+  scheduledDate?: string
 }
 
 type SerializedWorkoutLog = {
@@ -313,6 +315,7 @@ function mapExerciseSet(set: SerializedExerciseSet): ExerciseSet {
       : undefined,
     rir: set.rir,
     setNumber: set.setNumber,
+    targetRepsMin: set.targetRepsMin,
     targetReps: set.targetReps,
     weight: set.weight,
   }
@@ -340,6 +343,30 @@ function synthesizeExerciseVariation(exercise: SerializedWorkoutExercise): Exerc
   }
 }
 
+function parseScheduledDate(value?: string) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return undefined
+  }
+
+  const [year, month, day] = value.split("-").map(Number)
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return undefined
+  }
+
+  const parsedDate = new Date(year, month - 1, day)
+
+  if (
+    parsedDate.getFullYear() !== year ||
+    parsedDate.getMonth() !== month - 1 ||
+    parsedDate.getDate() !== day
+  ) {
+    return undefined
+  }
+
+  return parsedDate
+}
+
 function mapWorkoutExercise(exercise: SerializedWorkoutExercise): Workout["exercises"][number] {
   return {
     exercise: {
@@ -364,6 +391,7 @@ function mapWorkout(workout: SerializedWorkout): Workout {
     name: workout.name,
     notes: workout.notes,
     scheduledDay: workout.scheduledDay,
+    scheduledDate: parseScheduledDate(workout.scheduledDate),
   }
 }
 

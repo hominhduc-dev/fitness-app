@@ -25,6 +25,8 @@ type DeleteWorkoutButtonProps = {
   confirmDescription?: string
   confirmTitle?: string
   label?: string
+  onDeleted?: () => void
+  refreshOnSuccess?: boolean
   size?: React.ComponentProps<typeof Button>["size"]
   variant?: React.ComponentProps<typeof Button>["variant"]
   workoutId: string
@@ -35,6 +37,8 @@ export function DeleteWorkoutButton({
   confirmDescription = "This will remove the personal workout from your schedule. Coach-assigned workouts are not affected.",
   confirmTitle = "Delete workout?",
   label,
+  onDeleted,
+  refreshOnSuccess = true,
   size = "icon",
   variant = "outline",
   workoutId,
@@ -85,8 +89,11 @@ export function DeleteWorkoutButton({
 
     try {
       await deleteWorkout(session.access_token, workoutId)
+      onDeleted?.()
       handleOpenChange(false)
-      router.refresh()
+      if (refreshOnSuccess) {
+        router.refresh()
+      }
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Unable to delete this workout.")
     } finally {

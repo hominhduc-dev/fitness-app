@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { requireAppSession } from "@/lib/auth/server"
 import { formatExerciseVariationLabel } from "@/lib/exercise-display"
 import { fetchWorkouts } from "@/lib/fitness/api"
+import { formatRepTarget } from "@/lib/workout-reps"
 
 function WorkoutPageSkeleton() {
   return (
@@ -73,9 +74,10 @@ function WorkoutPageSkeleton() {
 async function WorkoutContent() {
   const { accessToken } = await requireAppSession({ role: "trainee" })
   const workoutData = await fetchWorkouts(accessToken)
-  const quickStartWorkout = workoutData.todayWorkout ?? workoutData.workouts[0] ?? null
-  const personalWorkouts = workoutData.workouts.filter((workout) => workout.isPersonal)
-  const coachWorkouts = workoutData.workouts.filter((workout) => !workout.isPersonal)
+  const reusableWorkouts = workoutData.workouts.filter((workout) => !workout.scheduledDate)
+  const quickStartWorkout = workoutData.todayWorkout ?? reusableWorkouts[0] ?? workoutData.workouts[0] ?? null
+  const personalWorkouts = reusableWorkouts.filter((workout) => workout.isPersonal)
+  const coachWorkouts = reusableWorkouts.filter((workout) => !workout.isPersonal)
 
   const renderWorkoutGrid = (workouts: typeof workoutData.workouts) => (
     <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -116,7 +118,10 @@ async function WorkoutContent() {
                       })}
                     </span>
                   <span className="text-[1.05rem] font-semibold tracking-tight text-slate-900">
-                    {exercise.sets.length} × {exercise.sets[0]?.targetReps ?? "?"}
+                    {exercise.sets.length} × {formatRepTarget({
+                      reps: exercise.sets[0]?.targetReps,
+                      repsMin: exercise.sets[0]?.targetRepsMin,
+                    })}
                   </span>
                 </div>
               ))}
@@ -201,7 +206,7 @@ async function WorkoutContent() {
           <h1 className="text-2xl font-bold md:text-3xl">Workouts</h1>
           <p className="mt-1 text-muted-foreground">Coach-assigned plans and personal workouts you can build yourself</p>
         </div>
-        <CreateWorkoutDialog workoutTemplates={workoutData.workouts} />
+        <CreateWorkoutDialog workoutTemplates={reusableWorkouts} />
       </div>
 
       {quickStartWorkout ? (
@@ -240,7 +245,7 @@ async function WorkoutContent() {
               Create your own workout now or wait for a coach to assign a program.
             </p>
             <div className="mt-4 flex justify-center">
-              <CreateWorkoutDialog workoutTemplates={workoutData.workouts} />
+              <CreateWorkoutDialog workoutTemplates={reusableWorkouts} />
             </div>
           </div>
         ) : (

@@ -7,6 +7,7 @@ import { useLocale } from "@/components/providers/locale-provider"
 import { Button } from "@/components/ui/button"
 import { formatExerciseVariationLabel } from "@/lib/exercise-display"
 import type { Workout } from "@/lib/types"
+import { formatRepTarget } from "@/lib/workout-reps"
 
 interface TodayWorkoutProps {
   workout: Workout | null
@@ -61,7 +62,10 @@ export function TodayWorkout({ workout }: TodayWorkoutProps) {
                   })}
                 </span>
                 <span className="text-[1.05rem] font-semibold tracking-tight text-slate-900">
-                  {exercise.sets.length} × {exercise.sets[0]?.targetReps ?? "?"}
+                  {exercise.sets.length} × {formatRepTarget({
+                    reps: exercise.sets[0]?.targetReps,
+                    repsMin: exercise.sets[0]?.targetRepsMin,
+                  })}
                 </span>
               </div>
             ))}

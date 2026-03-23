@@ -246,8 +246,9 @@ function buildAxisLabels(days: RangeValue, localeCode: string) {
 }
 
 function buildWeightSummary(entries: BodyMetricEntry[], targetWeightKg?: number | null) {
-  const currentWeightKg = entries[0]?.weightKg
-  const previousWeightKg = entries[1]?.weightKg
+  const weightedEntries = entries.filter((entry) => isFiniteNumber(entry.weightKg))
+  const currentWeightKg = weightedEntries[0]?.weightKg
+  const previousWeightKg = weightedEntries[1]?.weightKg
   const currentDeltaKg =
     isFiniteNumber(currentWeightKg) && isFiniteNumber(previousWeightKg) ? currentWeightKg - previousWeightKg : undefined
 
@@ -267,12 +268,21 @@ function buildWeightSummary(entries: BodyMetricEntry[], targetWeightKg?: number 
       ? currentWeightKg - oldestWeeklyWeightKg
       : currentDeltaKg
 
+  const oldestLoggedWeightKg = weightedEntries.at(-1)?.weightKg
   const hasTargetWeight = isFiniteNumber(targetWeightKg)
   const resolvedCurrentWeightKg = isFiniteNumber(currentWeightKg) ? currentWeightKg : undefined
   const canTrackGoal = hasTargetWeight && resolvedCurrentWeightKg != null
   const goalDirection = getGoalDirection(resolvedCurrentWeightKg, targetWeightKg ?? undefined)
+  const goalStartWeightKg =
+    canTrackGoal && isFiniteNumber(oldestLoggedWeightKg) ? oldestLoggedWeightKg : resolvedCurrentWeightKg
   const targetDeltaKg = canTrackGoal ? resolvedCurrentWeightKg - (targetWeightKg as number) : undefined
   const isTargetMet = isFiniteNumber(targetDeltaKg) ? Math.abs(targetDeltaKg) <= 0.15 : false
+  const totalGoalDirection =
+    canTrackGoal && isFiniteNumber(goalStartWeightKg)
+      ? getGoalDirection(goalStartWeightKg, targetWeightKg ?? undefined)
+      : ("steady" satisfies GoalDirection)
+  const totalGoalDistanceKg =
+    canTrackGoal && isFiniteNumber(goalStartWeightKg) ? Math.abs(goalStartWeightKg - (targetWeightKg as number)) : undefined
   const weeklyTargetKg =
     canTrackGoal && !isTargetMet
       ? Math.min(getWeeklyTargetKg(goalDirection), Math.abs(targetDeltaKg as number))
@@ -280,19 +290,46 @@ function buildWeightSummary(entries: BodyMetricEntry[], targetWeightKg?: number 
 
   let goalProgressPct = 0
   let goalRemainingKg: number | undefined
+  let weeklyGoalProgressPct = 0
+  let weeklyGoalRemainingKg: number | undefined
 
   if (canTrackGoal) {
-    if (weeklyTargetKg <= 0) {
+    if (isTargetMet) {
       goalProgressPct = 100
       goalRemainingKg = 0
+    } else if (!isFiniteNumber(totalGoalDistanceKg) || totalGoalDistanceKg <= 0.15) {
+      goalProgressPct = 0
+      goalRemainingKg = Math.abs(targetDeltaKg as number)
+    } else if (totalGoalDirection === "down") {
+      const remainingToTargetKg = Math.max(resolvedCurrentWeightKg - (targetWeightKg as number), 0)
+      goalProgressPct = Math.max(
+        0,
+        Math.min(100, Math.round(((totalGoalDistanceKg - remainingToTargetKg) / totalGoalDistanceKg) * 100)),
+      )
+      goalRemainingKg = remainingToTargetKg
+    } else if (totalGoalDirection === "up") {
+      const remainingToTargetKg = Math.max((targetWeightKg as number) - resolvedCurrentWeightKg, 0)
+      goalProgressPct = Math.max(
+        0,
+        Math.min(100, Math.round(((totalGoalDistanceKg - remainingToTargetKg) / totalGoalDistanceKg) * 100)),
+      )
+      goalRemainingKg = remainingToTargetKg
+    } else {
+      goalProgressPct = 0
+      goalRemainingKg = Math.abs(targetDeltaKg as number)
+    }
+
+    if (weeklyTargetKg <= 0) {
+      weeklyGoalProgressPct = 100
+      weeklyGoalRemainingKg = 0
     } else if (goalDirection === "down") {
       const progressWeightKg = isFiniteNumber(weeklyChangeKg) ? Math.max(-weeklyChangeKg, 0) : 0
-      goalProgressPct = Math.min(100, Math.round((progressWeightKg / weeklyTargetKg) * 100))
-      goalRemainingKg = Math.max(0, weeklyTargetKg - progressWeightKg)
+      weeklyGoalProgressPct = Math.min(100, Math.round((progressWeightKg / weeklyTargetKg) * 100))
+      weeklyGoalRemainingKg = Math.max(0, weeklyTargetKg - progressWeightKg)
     } else if (goalDirection === "up") {
       const progressWeightKg = isFiniteNumber(weeklyChangeKg) ? Math.max(weeklyChangeKg, 0) : 0
-      goalProgressPct = Math.min(100, Math.round((progressWeightKg / weeklyTargetKg) * 100))
-      goalRemainingKg = Math.max(0, weeklyTargetKg - progressWeightKg)
+      weeklyGoalProgressPct = Math.min(100, Math.round((progressWeightKg / weeklyTargetKg) * 100))
+      weeklyGoalRemainingKg = Math.max(0, weeklyTargetKg - progressWeightKg)
     }
   }
 
@@ -303,12 +340,16 @@ function buildWeightSummary(entries: BodyMetricEntry[], targetWeightKg?: number 
     goalDirection,
     goalProgressPct,
     goalRemainingKg,
+    goalStartWeightKg,
     hasTargetWeight,
     isTargetMet,
     targetDeltaKg,
     targetWeightKg: hasTargetWeight ? targetWeightKg : undefined,
     weeklyAverageKg,
     weeklyChangeKg,
+    weeklyGoalProgressPct,
+    weeklyGoalRemainingKg,
+    weeklyTargetKg,
   }
 }
 
@@ -923,10 +964,10 @@ export function WeightTrackingClient() {
                             formatWeight(summary.targetWeightKg, weightUnit),
                             weightUnit,
                           )
-                        : (summary.goalRemainingKg ?? 0) <= 0
+                        : (summary.weeklyGoalRemainingKg ?? 0) <= 0
                           ? messages.progressPage.goalAchieved
                           : messages.progressPage.goalAway(
-                              formatWeight(summary.goalRemainingKg, weightUnit),
+                              formatWeight(summary.weeklyGoalRemainingKg, weightUnit),
                               weightUnit,
                             )}
                 </p>
@@ -938,7 +979,7 @@ export function WeightTrackingClient() {
                 ) : null}
 
                 <Progress
-                  value={summary.hasTargetWeight ? summary.goalProgressPct : 0}
+                  value={summary.hasTargetWeight ? summary.weeklyGoalProgressPct : 0}
                   className="mt-8 h-2.5 bg-slate-100 [&_[data-slot=progress-indicator]]:bg-primary"
                 />
             </section>

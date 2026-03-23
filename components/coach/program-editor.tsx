@@ -14,9 +14,23 @@ import {
 } from "@dnd-kit/core"
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { ArrowLeft, ChevronDown, ChevronUp, Dumbbell, GripVertical, Plus, Save, Trash2, Users } from "lucide-react"
-import { useEffect, useState } from "react"
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Dumbbell,
+  GripVertical,
+  Loader2,
+  Plus,
+  Save,
+  Trash2,
+  Upload,
+  Users,
+} from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 
+import { downloadCoachProgramTemplate, importCoachProgramTemplate } from "@/components/coach/program-excel"
 import { ExercisePicker } from "@/components/exercises/exercise-picker"
 import { useAuth } from "@/components/providers/auth-provider"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -35,12 +49,18 @@ import {
   fetchExercises,
   updateCoachProgram,
 } from "@/lib/fitness/api"
-import type { CoachProgram, CoachTrainee, ExerciseVariationOption } from "@/lib/fitness/types"
+import { formatRepTarget, parseRepTargetText } from "@/lib/workout-reps"
+import type {
+  CoachProgram,
+  CoachTrainee,
+  CreateCoachProgramInput,
+  ExerciseVariationOption,
+} from "@/lib/fitness/types"
 
 type WorkoutExerciseForm = {
   variationId: string
   id: string
-  reps: number
+  reps: string
   sets: number
   weight: string
 }
@@ -66,10 +86,18 @@ const DAY_OPTIONS = [
   { label: "Sunday", value: "0" },
 ]
 
+function createFormId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID()
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
 function createWorkoutDay(index: number): WorkoutDay {
   return {
     exercises: [],
-    id: String(Date.now() + index),
+    id: createFormId(),
     name: `Day ${index + 1}`,
     scheduledDay: String((index + 1) % 7),
   }
@@ -88,7 +116,10 @@ function mapProgramToWorkoutDays(program: CoachProgram): WorkoutDay[] {
     exercises: workout.exercises.map((exercise) => ({
       variationId: exercise.variation.id,
       id: exercise.id,
-      reps: exercise.sets[0]?.targetReps ?? 1,
+      reps: formatRepTarget({
+        reps: exercise.sets[0]?.targetReps ?? 1,
+        repsMin: exercise.sets[0]?.targetRepsMin,
+      }),
       sets: exercise.sets.length,
       weight: exercise.sets[0]?.weight != null ? String(exercise.sets[0].weight) : "",
     })),
@@ -107,6 +138,24 @@ function getInitials(name: string) {
 
 function getScheduledDayLabel(scheduledDay: string) {
   return DAY_OPTIONS.find((option) => option.value === scheduledDay)?.label ?? "Unscheduled"
+}
+
+function mapImportedWorkoutsToWorkoutDays(workouts: CreateCoachProgramInput["workouts"]): WorkoutDay[] {
+  return workouts.map((workout, index) => ({
+    exercises: workout.exercises.map((exercise) => ({
+      variationId: exercise.variationId,
+      id: createFormId(),
+      reps: formatRepTarget({
+        reps: exercise.reps,
+        repsMin: exercise.repsMin,
+      }),
+      sets: exercise.sets,
+      weight: exercise.weight != null ? String(exercise.weight) : "",
+    })),
+    id: createFormId(),
+    name: workout.name || `Day ${index + 1}`,
+    scheduledDay: String(workout.scheduledDay ?? ((index + 1) % 7)),
+  }))
 }
 
 function SortableWorkoutExerciseCard({
@@ -183,10 +232,11 @@ function SortableWorkoutExerciseCard({
             </span>
             <Input
               id={`${exercise.id}-reps`}
-              type="number"
+              type="text"
               value={exercise.reps}
-              min={1}
-              onChange={(event) => onUpdate({ reps: Number(event.target.value) || 1 })}
+              inputMode="numeric"
+              onChange={(event) => onUpdate({ reps: event.target.value })}
+              placeholder="8-12"
               className="h-5 w-full border-0 bg-transparent px-0 text-center text-sm font-semibold shadow-none focus-visible:border-transparent focus-visible:ring-0"
             />
           </div>
@@ -228,6 +278,7 @@ function SortableWorkoutExerciseCard({
 export function ProgramEditor({ programId }: ProgramEditorProps) {
   const router = useRouter()
   const { isLoading: authLoading, session } = useAuth()
+  const importInputRef = useRef<HTMLInputElement | null>(null)
   const [programName, setProgramName] = useState("")
   const [description, setDescription] = useState("")
   const [duration, setDuration] = useState("8")
@@ -243,6 +294,11 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [importFileName, setImportFileName] = useState<string | null>(null)
+  const [importInputKey, setImportInputKey] = useState(0)
+  const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false)
+  const [isImportingWorkbook, setIsImportingWorkbook] = useState(false)
 
   useEffect(() => {
     if (!session?.access_token) {
@@ -345,8 +401,8 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
                 ...day.exercises,
                 {
                   variationId: defaultVariationId,
-                  id: String(Date.now()),
-                  reps: 10,
+                  id: createFormId(),
+                  reps: "8-12",
                   sets: 3,
                   weight: "",
                 },
@@ -434,7 +490,7 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
     )
   }
 
-  const buildProgramPayload = () => ({
+  const buildProgramPayload = (): CreateCoachProgramInput => ({
     assignToUserIds: selectedTraineeIds,
     description: description.trim() || undefined,
     difficulty: difficulty as "beginner" | "intermediate" | "advanced",
@@ -443,12 +499,20 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
     workouts: workoutDays
       .map((day, index) => ({
         duration: estimateWorkoutDuration(day.exercises),
-        exercises: day.exercises.map((exercise) => {
+        exercises: day.exercises.map((exercise, exerciseIndex) => {
           const parsedWeight = Number(exercise.weight)
+          const repTarget = parseRepTargetText(exercise.reps)
+
+          if (!repTarget) {
+            throw new Error(
+              `Reps range không hợp lệ ở ${day.name.trim() || `Day ${index + 1}`} / bài tập ${exerciseIndex + 1}. Dùng dạng 8-12 hoặc 10.`,
+            )
+          }
 
           return {
+            reps: repTarget.reps,
+            repsMin: repTarget.repsMin,
             variationId: exercise.variationId,
-            reps: exercise.reps,
             sets: exercise.sets,
             weight:
               exercise.weight.trim() && Number.isFinite(parsedWeight)
@@ -467,7 +531,14 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
       return
     }
 
-    const payload = buildProgramPayload()
+    let payload: CreateCoachProgramInput
+
+    try {
+      payload = buildProgramPayload()
+    } catch (buildError) {
+      setError(buildError instanceof Error ? buildError.message : "Không thể chuẩn hóa rep range cho program.")
+      return
+    }
 
     if (!payload.name) {
       setError("Tên chương trình không được để trống.")
@@ -519,6 +590,70 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
     }
   }
 
+  const handleDownloadTemplate = async () => {
+    setIsDownloadingTemplate(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      await downloadCoachProgramTemplate(exerciseOptions, traineeOptions)
+      setNotice("Downloaded Excel template for coach programs.")
+    } catch (templateError) {
+      setError(templateError instanceof Error ? templateError.message : "Không thể tạo file mẫu program.")
+    } finally {
+      setIsDownloadingTemplate(false)
+    }
+  }
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    setIsImportingWorkbook(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const importedProgram = await importCoachProgramTemplate(file, exerciseOptions, traineeOptions)
+      const importedWorkoutDays = mapImportedWorkoutsToWorkoutDays(importedProgram.workouts)
+
+      if (typeof importedProgram.name === "string") {
+        setProgramName(importedProgram.name)
+      }
+
+      if (typeof importedProgram.description === "string") {
+        setDescription(importedProgram.description)
+      }
+
+      if (typeof importedProgram.duration === "number") {
+        setDuration(String(importedProgram.duration))
+      }
+
+      if (importedProgram.difficulty) {
+        setDifficulty(importedProgram.difficulty)
+      }
+
+      if (importedProgram.assignToUserIds) {
+        setSelectedTraineeIds(importedProgram.assignToUserIds)
+      }
+
+      setWorkoutDays(importedWorkoutDays)
+      setExpandedWorkoutDayIds(
+        Object.fromEntries(importedWorkoutDays.map((day) => [day.id, true])),
+      )
+      setImportFileName(file.name)
+      setNotice(`Imported ${importedWorkoutDays.length} workout day${importedWorkoutDays.length === 1 ? "" : "s"} from ${file.name}. Review the form, then save the program.`)
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "Không thể import program từ Excel.")
+    } finally {
+      setImportInputKey((current) => current + 1)
+      setIsImportingWorkbook(false)
+    }
+  }
+
   if (isLoadingPage) {
     return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground">Loading program...</div>
   }
@@ -526,7 +661,49 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
   const selectedTrainees = traineeOptions.filter((trainee) => selectedTraineeIds.includes(trainee.id))
 
   return (
-    <div className="mx-auto max-w-4xl px-3 py-4 sm:px-4 sm:py-6 md:px-6">
+    <div className="mx-auto max-w-4xl px-3 py-4 sm:px-4 sm:py-6 md:px-6" aria-busy={isSaving}>
+      {isSaving ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[28px] border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,250,255,0.94)_100%)] p-6 text-center shadow-2xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+            <h2 className="mt-5 text-xl font-semibold">Saving program...</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Updating workouts, rep ranges, and trainee assignments. Please keep this tab open.
+            </p>
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl border border-border/70 bg-background/80 px-4 py-3">
+                <div className="flex items-center justify-center gap-2 text-primary">
+                  <Dumbbell className="h-4 w-4" />
+                  <span className="text-sm font-semibold">{workoutDays.length}</span>
+                </div>
+                <p className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                  {workoutDays.length === 1 ? "Workout Day" : "Workout Days"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-background/80 px-4 py-3">
+                <div className="flex items-center justify-center gap-2 text-primary">
+                  <Users className="h-4 w-4" />
+                  <span className="text-sm font-semibold">{selectedTraineeIds.length}</span>
+                </div>
+                <p className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                  {selectedTraineeIds.length === 1 ? "Trainee" : "Trainees"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-left">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Program</p>
+              <p className="mt-1 truncate text-sm font-medium text-foreground">
+                {programName.trim() || (programId ? "Current Program" : "New Program")}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="mb-4 flex items-center gap-3 sm:mb-6">
         <Link href="/coach/programs">
           <Button variant="ghost" size="icon" className="shrink-0">
@@ -546,6 +723,12 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
       {error ? (
         <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className="mb-4 rounded-xl border border-emerald-300/40 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {notice}
         </div>
       ) : null}
 
@@ -639,8 +822,56 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
                       </Select>
                     </div>
                   </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-card p-4 sm:p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-1">
+                  <h2 className="text-base font-semibold sm:text-lg">Excel Import</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Download the template, fill it offline, then import it to replace the current form values before saving.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Supported files: .xlsx, .xls, .csv. Use <span className="font-medium">reps_range</span> like <span className="font-medium">8-12</span> or <span className="font-medium">10</span>. Variation matching prefers <span className="font-medium">variation_id</span>, then falls back to <span className="font-medium">exercise_name + variation_name</span>.
+                  </p>
+                  {importFileName ? (
+                    <p className="text-xs font-medium text-foreground">Last imported file: {importFileName}</p>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    key={importInputKey}
+                    ref={importInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(event) => void handleImportFile(event)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 bg-transparent"
+                    onClick={() => void handleDownloadTemplate()}
+                    disabled={isDownloadingTemplate || isImportingWorkbook || exerciseOptions.length === 0}
+                  >
+                    {isDownloadingTemplate ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    Download Template
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 bg-transparent"
+                    onClick={() => importInputRef.current?.click()}
+                    disabled={isImportingWorkbook || isDownloadingTemplate || exerciseOptions.length === 0}
+                  >
+                    {isImportingWorkbook ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    Import Excel
+                  </Button>
                 </div>
               </div>
+            </div>
 
               <div className="rounded-xl border border-border bg-card p-4 sm:p-6">
                 <div className="flex items-center justify-between gap-3">
@@ -919,7 +1150,7 @@ export function ProgramEditor({ programId }: ProgramEditorProps) {
                   </Button>
                 </Link>
                 <Button className="w-full sm:w-auto gap-2 bg-primary hover:bg-primary/90" onClick={() => void handleSaveProgram()} disabled={isSaving}>
-                  <Save className="h-4 w-4" />
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {isSaving ? "Saving..." : programId ? "Update Program" : "Save Program"}
                 </Button>
               </div>

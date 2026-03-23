@@ -187,6 +187,7 @@ type CreateCoachProgramInput = {
   workouts: Array<{
     duration?: number
     exercises: Array<{
+      repsMin?: number
       variationId: string
       reps: number
       sets: number
@@ -194,12 +195,14 @@ type CreateCoachProgramInput = {
     }>
     name: string
     scheduledDay?: number
+    scheduledDate?: string
   }>
 }
 
 type CreateWorkoutInput = {
   duration?: number
   exercises: Array<{
+    repsMin?: number
     variationId: string
     reps: number
     restTime?: number
@@ -209,6 +212,7 @@ type CreateWorkoutInput = {
   name: string
   notes?: string
   scheduledDay?: number
+  scheduledDate?: string
 }
 
 type WorkoutLogInput = {

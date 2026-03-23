@@ -61,6 +61,7 @@ export interface PreviousExerciseSetPerformance {
 export interface ExerciseSet {
   id: string
   setNumber: number
+  targetRepsMin?: number
   targetReps: number
   actualReps?: number
   weight?: number
@@ -85,6 +86,7 @@ export interface Workout {
   name: string
   exercises: WorkoutExercise[]
   scheduledDay?: number // 0-6 for days of week
+  scheduledDate?: Date
   duration?: number // minutes
   completedAt?: Date
   notes?: string

@@ -97,6 +97,7 @@ type WorkoutLogSnapshotSet = {
   actualReps?: number | null
   completed?: boolean
   setNumber?: number | null
+  targetRepsMin?: number | null
   targetReps?: number | null
   weight?: number | null
 }
@@ -126,6 +127,7 @@ type CoachCheckInRecord = CoachCheckIn & {
 type PersonalWorkoutInput = {
   duration?: number
   exercises: Array<{
+    repsMin?: number
     variationId: string
     reps: number
     restTime?: number
@@ -135,11 +137,13 @@ type PersonalWorkoutInput = {
   name: string
   notes?: string | null
   scheduledDay?: number
+  scheduledDate?: string
 }
 
 type NormalizedPersonalWorkoutInput = {
   duration?: number
   exercises: Array<{
+    repsMin?: number
     variationId: string
     reps: number
     restTime?: number
@@ -149,6 +153,7 @@ type NormalizedPersonalWorkoutInput = {
   name: string
   notes?: string
   scheduledDay?: number
+  scheduledDate?: Date
 }
 
 const DEFAULT_CALORIE_TARGET = 2500
@@ -271,6 +276,7 @@ function serializeExerciseSet(set: ExerciseSet, previousPerformanceBySetNumber?:
     previousPerformance: previousPerformance ? serializePreviousSetPerformance(previousPerformance) : undefined,
     rir: set.rir ?? undefined,
     setNumber: set.setNumber,
+    targetRepsMin: set.targetRepsMin ?? undefined,
     targetReps: set.targetReps,
     weight: set.weight ?? undefined,
   }
@@ -304,6 +310,7 @@ function serializeWorkout(
     name: workout.name,
     notes: workout.notes ?? undefined,
     scheduledDay: workout.scheduledDay ?? undefined,
+    scheduledDate: workout.scheduledDate ? formatUtcDateOnly(workout.scheduledDate) : undefined,
   }
 }
 
@@ -407,7 +414,14 @@ function serializeCoachCheckIn(entry: CoachCheckInRecord) {
 function serializeWorkoutLog(log: WorkoutLogRecord) {
   const snapshotWorkout =
     log.workoutSnapshot && typeof log.workoutSnapshot === "object" && !Array.isArray(log.workoutSnapshot)
-      ? (log.workoutSnapshot as { duration?: number; id?: string; name?: string; notes?: string; scheduledDay?: number })
+      ? (log.workoutSnapshot as {
+          duration?: number
+          id?: string
+          name?: string
+          notes?: string
+          scheduledDate?: string
+          scheduledDay?: number
+        })
       : null
 
   const snapshotExercises =
@@ -430,6 +444,7 @@ function serializeWorkoutLog(log: WorkoutLogRecord) {
           id: snapshotWorkout?.id ?? log.workoutId ?? log.id,
           name: snapshotWorkout?.name ?? "Workout",
           notes: snapshotWorkout?.notes,
+          scheduledDate: snapshotWorkout?.scheduledDate,
           scheduledDay: snapshotWorkout?.scheduledDay,
         },
   }
@@ -473,6 +488,10 @@ function calculateWorkoutVolume(exercises: Array<{ sets?: Array<{ actualReps?: n
   }, 0)
 }
 
+function formatUtcDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10)
+}
+
 function toUtcDayStart(date: Date) {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
 }
@@ -509,6 +528,37 @@ function formatWeekdayLabel(date: Date) {
 
 function toFiniteNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function normalizeRepTarget(reps: number, repsMin?: number | null, contextLabel?: string) {
+  const normalizedReps = Number.isFinite(reps) ? Math.max(1, Math.round(reps)) : 1
+
+  if (repsMin == null) {
+    return {
+      reps: normalizedReps,
+    }
+  }
+
+  if (!Number.isFinite(repsMin)) {
+    throw new AuthServiceError(
+      `${contextLabel ? `${contextLabel}: ` : ""}Khoảng reps không hợp lệ. Giá trị bắt đầu phải là số nguyên dương.`,
+      400,
+    )
+  }
+
+  const normalizedRepsMin = Math.max(1, Math.round(repsMin))
+
+  if (normalizedRepsMin >= normalizedReps) {
+    throw new AuthServiceError(
+      `${contextLabel ? `${contextLabel}: ` : ""}Khoảng reps không hợp lệ. Giá trị bắt đầu phải nhỏ hơn giá trị kết thúc.`,
+      400,
+    )
+  }
+
+  return {
+    reps: normalizedReps,
+    repsMin: normalizedRepsMin,
+  }
 }
 
 function parseWorkoutLogSnapshotExercises(snapshot: Prisma.JsonValue | null) {
@@ -555,6 +605,22 @@ function getSnapshotMuscleGroup(exercise: WorkoutLogSnapshotExercise) {
 
 function startOfUtcDay(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+}
+
+function parseScheduledDateInput(value: string) {
+  const trimmedValue = value.trim()
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmedValue)) {
+    return undefined
+  }
+
+  const parsedDate = new Date(`${trimmedValue}T00:00:00.000Z`)
+
+  if (Number.isNaN(parsedDate.getTime()) || formatUtcDateOnly(parsedDate) !== trimmedValue) {
+    return undefined
+  }
+
+  return parsedDate
 }
 
 function addUtcDays(date: Date, days: number) {
@@ -1317,8 +1383,24 @@ async function listWorkoutsForTrainee(profile: SerializedProfile) {
   })
 
   const serializedWorkouts = Array.from(workoutMap.values())
-    .sort((left, right) => (left.scheduledDay ?? 7) - (right.scheduledDay ?? 7))
+    .sort((left, right) => {
+      if (left.scheduledDate && right.scheduledDate) {
+        return left.scheduledDate.getTime() - right.scheduledDate.getTime()
+      }
+
+      if (left.scheduledDate) {
+        return -1
+      }
+
+      if (right.scheduledDate) {
+        return 1
+      }
+
+      return (left.scheduledDay ?? 7) - (right.scheduledDay ?? 7)
+    })
     .map((workout) => serializeWorkout(workout, { isPersonal: personalWorkoutIds.has(workout.id) }))
+
+  const recurringWorkouts = serializedWorkouts.filter((workout) => !workout.scheduledDate)
 
   const recentLogs = await db.workoutLog.findMany({
     include: {
@@ -1336,15 +1418,18 @@ async function listWorkoutsForTrainee(profile: SerializedProfile) {
   })
 
   const schedule = DAY_LABELS.reduce<Record<number, ReturnType<typeof serializeWorkout> | null>>((accumulator, _label, index) => {
-    const workout = serializedWorkouts.find((item) => item.scheduledDay === index)
+    const workout = recurringWorkouts.find((item) => item.scheduledDay === index)
     accumulator[index] = workout ?? null
     return accumulator
   }, {})
 
+  const todayDateKey = formatUtcDateOnly(startOfUtcDay(new Date()))
+  const todayOneOffWorkout = serializedWorkouts.find((workout) => workout.scheduledDate === todayDateKey) ?? null
+
   return {
     recentLogs: recentLogs.map((log) => serializeWorkoutLog(log as WorkoutLogRecord)),
     schedule,
-    todayWorkout: schedule[new Date().getDay()] ?? null,
+    todayWorkout: todayOneOffWorkout ?? schedule[new Date().getDay()] ?? null,
     workouts: serializedWorkouts,
   }
 }
@@ -1421,13 +1506,14 @@ async function createWorkoutLogForTrainee(
       totalVolume,
       userId: profile.id,
       workoutId: workout.id,
-      workoutSnapshot: {
-        duration: serializedWorkout.duration,
-        id: serializedWorkout.id,
-        name: serializedWorkout.name,
-        notes: serializedWorkout.notes,
-        scheduledDay: serializedWorkout.scheduledDay,
-      } as Prisma.InputJsonObject,
+        workoutSnapshot: {
+          duration: serializedWorkout.duration,
+          id: serializedWorkout.id,
+          name: serializedWorkout.name,
+          notes: serializedWorkout.notes,
+          scheduledDate: serializedWorkout.scheduledDate,
+          scheduledDay: serializedWorkout.scheduledDay,
+        } as Prisma.InputJsonObject,
     },
     include: {
       workout: {
@@ -1455,6 +1541,16 @@ async function normalizePersonalWorkoutInput(input: PersonalWorkoutInput): Promi
     throw new AuthServiceError("Ngày tập không hợp lệ.", 400)
   }
 
+  if (input.scheduledDay != null && input.scheduledDate) {
+    throw new AuthServiceError("Chỉ được chọn một kiểu lịch: theo thứ hoặc theo ngày cụ thể.", 400)
+  }
+
+  const scheduledDate = input.scheduledDate ? parseScheduledDateInput(input.scheduledDate) : undefined
+
+  if (input.scheduledDate && !scheduledDate) {
+    throw new AuthServiceError("Ngày cụ thể không hợp lệ.", 400)
+  }
+
   if (input.exercises.some((exercise) => !exercise.variationId)) {
     throw new AuthServiceError("Mỗi dòng bài tập cần có variation hợp lệ.", 400)
   }
@@ -1474,19 +1570,25 @@ async function normalizePersonalWorkoutInput(input: PersonalWorkoutInput): Promi
 
   return {
     duration: input.duration ? Math.max(1, Math.round(input.duration)) : undefined,
-    exercises: input.exercises.map((exercise) => ({
-      variationId: exercise.variationId,
-      reps: Math.max(1, Math.round(exercise.reps)),
-      restTime: exercise.restTime ? Math.max(0, Math.round(exercise.restTime)) : undefined,
-      sets: Math.max(1, Math.round(exercise.sets)),
-      weight:
-        exercise.weight != null && Number.isFinite(exercise.weight)
-          ? Math.max(0, exercise.weight)
-          : undefined,
-    })),
+    exercises: input.exercises.map((exercise, exerciseIndex) => {
+      const repTarget = normalizeRepTarget(exercise.reps, exercise.repsMin, `Bài tập ${exerciseIndex + 1}`)
+
+      return {
+        reps: repTarget.reps,
+        repsMin: repTarget.repsMin,
+        variationId: exercise.variationId,
+        restTime: exercise.restTime ? Math.max(0, Math.round(exercise.restTime)) : undefined,
+        sets: Math.max(1, Math.round(exercise.sets)),
+        weight:
+          exercise.weight != null && Number.isFinite(exercise.weight)
+            ? Math.max(0, exercise.weight)
+            : undefined,
+      }
+    }),
     name: workoutName,
     notes: input.notes?.trim() || undefined,
-    scheduledDay: typeof input.scheduledDay === "number" ? input.scheduledDay : undefined,
+    scheduledDate,
+    scheduledDay: scheduledDate ? undefined : typeof input.scheduledDay === "number" ? input.scheduledDay : undefined,
   }
 }
 
@@ -1497,6 +1599,7 @@ function buildPersonalWorkoutExerciseCreateData(exercises: NormalizedPersonalWor
     sets: {
       create: Array.from({ length: exercise.sets }, (_value, setIndex) => ({
         setNumber: setIndex + 1,
+        targetRepsMin: exercise.repsMin,
         targetReps: exercise.reps,
         weight: exercise.weight,
       })),
@@ -1525,17 +1628,18 @@ async function createPersonalWorkoutForTrainee(
       difficulty: ProgramDifficulty.beginner,
       duration: 1,
       name: normalizedInput.name,
-      workouts: {
-        create: {
-          duration: normalizedInput.duration,
-          exercises: {
-            create: buildPersonalWorkoutExerciseCreateData(normalizedInput.exercises),
+        workouts: {
+          create: {
+            duration: normalizedInput.duration,
+            exercises: {
+              create: buildPersonalWorkoutExerciseCreateData(normalizedInput.exercises),
+            },
+            name: normalizedInput.name,
+            notes: normalizedInput.notes,
+            scheduledDate: normalizedInput.scheduledDate,
+            scheduledDay: normalizedInput.scheduledDay,
           },
-          name: normalizedInput.name,
-          notes: normalizedInput.notes,
-          scheduledDay: normalizedInput.scheduledDay,
         },
-      },
       workoutsPerWeek: 1,
     },
     include: {
@@ -1602,7 +1706,8 @@ async function updatePersonalWorkoutForTrainee(
         },
         name: normalizedInput.name,
         notes: normalizedInput.notes ?? null,
-        scheduledDay: normalizedInput.scheduledDay ?? null,
+        scheduledDate: normalizedInput.scheduledDate ?? null,
+        scheduledDay: normalizedInput.scheduledDate ? null : normalizedInput.scheduledDay ?? null,
       },
       include: {
         ...WORKOUT_INCLUDE,
@@ -1851,6 +1956,7 @@ async function createCoachProgram(
     workouts: Array<{
       duration?: number
       exercises: Array<{
+        repsMin?: number
         variationId: string
         reps: number
         sets: number
@@ -1929,20 +2035,29 @@ async function createCoachProgram(
         create: input.workouts.map((workout, workoutIndex) => ({
           duration: workout.duration ? Math.max(1, Math.round(workout.duration)) : undefined,
           exercises: {
-            create: workout.exercises.map((exercise, exerciseIndex) => ({
-              order: exerciseIndex + 1,
-              sets: {
-                create: Array.from({ length: Math.max(1, Math.round(exercise.sets)) }, (_value, setIndex) => ({
-                  setNumber: setIndex + 1,
-                  targetReps: Math.max(1, Math.round(exercise.reps)),
-                  weight:
-                    exercise.weight != null && Number.isFinite(exercise.weight)
-                      ? Math.max(0, exercise.weight)
-                      : undefined,
-                })),
-              },
-              variationId: exercise.variationId,
-            })),
+            create: workout.exercises.map((exercise, exerciseIndex) => {
+              const repTarget = normalizeRepTarget(
+                exercise.reps,
+                exercise.repsMin,
+                `${workout.name.trim() || `Buổi ${workoutIndex + 1}`} / bài tập ${exerciseIndex + 1}`,
+              )
+
+              return {
+                order: exerciseIndex + 1,
+                sets: {
+                  create: Array.from({ length: Math.max(1, Math.round(exercise.sets)) }, (_value, setIndex) => ({
+                    setNumber: setIndex + 1,
+                    targetReps: repTarget.reps,
+                    targetRepsMin: repTarget.repsMin,
+                    weight:
+                      exercise.weight != null && Number.isFinite(exercise.weight)
+                        ? Math.max(0, exercise.weight)
+                        : undefined,
+                  })),
+                },
+                variationId: exercise.variationId,
+              }
+            }),
           },
           name: workout.name.trim() || `Day ${workoutIndex + 1}`,
           scheduledDay: typeof workout.scheduledDay === "number" ? workout.scheduledDay : undefined,
@@ -1968,6 +2083,7 @@ async function updateCoachProgram(
     workouts: Array<{
       duration?: number
       exercises: Array<{
+        repsMin?: number
         variationId: string
         reps: number
         sets: number
@@ -2067,20 +2183,29 @@ async function updateCoachProgram(
           create: input.workouts.map((workout, workoutIndex) => ({
             duration: workout.duration ? Math.max(1, Math.round(workout.duration)) : undefined,
             exercises: {
-              create: workout.exercises.map((exercise, exerciseIndex) => ({
-                order: exerciseIndex + 1,
-                sets: {
-                  create: Array.from({ length: Math.max(1, Math.round(exercise.sets)) }, (_value, setIndex) => ({
-                    setNumber: setIndex + 1,
-                    targetReps: Math.max(1, Math.round(exercise.reps)),
-                    weight:
-                      exercise.weight != null && Number.isFinite(exercise.weight)
-                        ? Math.max(0, exercise.weight)
-                        : undefined,
-                  })),
-                },
-                variationId: exercise.variationId,
-              })),
+              create: workout.exercises.map((exercise, exerciseIndex) => {
+                const repTarget = normalizeRepTarget(
+                  exercise.reps,
+                  exercise.repsMin,
+                  `${workout.name.trim() || `Buổi ${workoutIndex + 1}`} / bài tập ${exerciseIndex + 1}`,
+                )
+
+                return {
+                  order: exerciseIndex + 1,
+                  sets: {
+                    create: Array.from({ length: Math.max(1, Math.round(exercise.sets)) }, (_value, setIndex) => ({
+                      setNumber: setIndex + 1,
+                      targetReps: repTarget.reps,
+                      targetRepsMin: repTarget.repsMin,
+                      weight:
+                        exercise.weight != null && Number.isFinite(exercise.weight)
+                          ? Math.max(0, exercise.weight)
+                          : undefined,
+                    })),
+                  },
+                  variationId: exercise.variationId,
+                }
+              }),
             },
             name: workout.name.trim() || `Day ${workoutIndex + 1}`,
             scheduledDay: typeof workout.scheduledDay === "number" ? workout.scheduledDay : undefined,

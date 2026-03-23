@@ -30,7 +30,7 @@ export const progressMessages = {
       year1: "1 Year",
       weeklyGoal: "Weekly Goal",
       goalTarget: (value: string, unit: string) => `Target: ${value}${unit ? ` ${unit}` : ""}`,
-      targetWeightNeeded: "Set a target weight in Settings to track weekly progress.",
+      targetWeightNeeded: "Set a target weight in Settings to track your progress.",
       targetWeightReached: (value: string, unit: string) =>
         `You are within your target band of ${value}${unit ? ` ${unit}` : ""}. Stay consistent this week.`,
       goalAchieved: "You are on pace with this week's milestone. Keep your morning routine consistent.",
@@ -85,7 +85,7 @@ export const progressMessages = {
       year1: "1 nam",
       weeklyGoal: "Muc tieu tuan",
       goalTarget: (value: string, unit: string) => `Muc tieu: ${value}${unit ? ` ${unit}` : ""}`,
-      targetWeightNeeded: "Hay dat can nang muc tieu trong Settings de theo doi tien do.",
+      targetWeightNeeded: "Hay dat can nang muc tieu trong Settings de theo doi tien do cua ban.",
       targetWeightReached: (value: string, unit: string) =>
         `Ban dang nam trong vung muc tieu ${value}${unit ? ` ${unit}` : ""}. Hay giu deu nhip do tuan nay.`,
       goalAchieved: "Ban dang bam sat moc tuan nay. Giu deu routine can buoi sang.",

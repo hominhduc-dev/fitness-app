@@ -40,15 +40,44 @@ function startOfCurrentWeek(date: Date) {
   return value
 }
 
+function addLocalDays(date: Date, days: number) {
+  const value = new Date(date)
+  value.setDate(value.getDate() + days)
+  return value
+}
+
+function isSameCalendarDate(left: Date, right: Date) {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  )
+}
+
+function getWorkoutForDate(
+  workouts: Awaited<ReturnType<typeof fetchWorkouts>>["workouts"],
+  schedule: Awaited<ReturnType<typeof fetchWorkouts>>["schedule"],
+  date: Date,
+) {
+  const oneOffWorkout = workouts.find((workout) => workout.scheduledDate && isSameCalendarDate(workout.scheduledDate, date))
+
+  if (oneOffWorkout) {
+    return oneOffWorkout
+  }
+
+  return schedule[date.getDay()] ?? null
+}
+
 function resolveNextWorkoutLabel(
+  workouts: Awaited<ReturnType<typeof fetchWorkouts>>["workouts"],
   schedule: Awaited<ReturnType<typeof fetchWorkouts>>["schedule"],
   messages: DashboardMessages,
 ) {
-  const today = new Date().getDay()
+  const today = new Date()
 
   for (let offset = 0; offset < 7; offset += 1) {
-    const day = (today + offset) % 7
-    const workout = schedule[day]
+    const date = addLocalDays(today, offset)
+    const workout = getWorkoutForDate(workouts, schedule, date)
 
     if (!workout) {
       continue
@@ -80,13 +109,22 @@ function resolveNextWorkoutLabel(
   }
 }
 
+function countScheduledWorkoutsInWeek(
+  workouts: Awaited<ReturnType<typeof fetchWorkouts>>["workouts"],
+  schedule: Awaited<ReturnType<typeof fetchWorkouts>>["schedule"],
+  weekStart: Date,
+) {
+  return Array.from({ length: 7 }, (_value, index) => getWorkoutForDate(workouts, schedule, addLocalDays(weekStart, index))).filter(Boolean)
+    .length
+}
+
 async function DashboardOverview({ accessToken, locale, messages, preferredWeightUnit }: DashboardOverviewProps) {
   const { workoutData, mealData } = await getDashboardData(accessToken)
 
   const isVietnamese = locale === "vi"
   const weekStart = startOfCurrentWeek(new Date())
   const workoutsThisWeek = workoutData.recentLogs.filter((log) => log.startedAt >= weekStart).length
-  const scheduledThisWeek = Object.values(workoutData.schedule).filter(Boolean).length
+  const scheduledThisWeek = countScheduledWorkoutsInWeek(workoutData.workouts, workoutData.schedule, weekStart)
   const completedDays = new Set(
     workoutData.recentLogs.filter((log) => log.startedAt >= weekStart).map((log) => log.startedAt.getDay()),
   )
@@ -94,7 +132,7 @@ async function DashboardOverview({ accessToken, locale, messages, preferredWeigh
   const totalVolume = workoutData.recentLogs
     .filter((log) => log.startedAt >= weekStart)
     .reduce((sum, log) => sum + (log.totalVolume ?? 0), 0)
-  const nextWorkout = resolveNextWorkoutLabel(workoutData.schedule, messages)
+  const nextWorkout = resolveNextWorkoutLabel(workoutData.workouts, workoutData.schedule, messages)
   const volumeUnitLabel = preferredWeightUnit === "lbs" ? messages.dashboard.lbs : "kg"
   const statCards = [
     {

@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { addDays, differenceInMinutes, format, isSameDay, isToday, startOfWeek } from "date-fns"
 import { CheckCircle2, ChevronLeft, ChevronRight, Copy, PencilLine, Play, Plus } from "lucide-react"
 
@@ -90,14 +90,123 @@ function getMobileEntrySubcopy(entry: ScheduleEntry) {
   return `${entry.workout.name} · ${exerciseCount} exercise${exerciseCount === 1 ? "" : "s"}`
 }
 
+function getDateKey(date: Date) {
+  return format(date, "yyyy-MM-dd")
+}
+
+function getWeekDateForScheduledDay(weekStart: Date, scheduledDay: number) {
+  return addDays(weekStart, (scheduledDay + 6) % 7)
+}
+
+function getScheduledWorkoutForDate(workouts: Workout[], schedule: WeeklySchedule, date: Date) {
+  const oneOffWorkout = workouts.find((workout) => workout.scheduledDate && isSameDay(workout.scheduledDate, date))
+
+  if (oneOffWorkout) {
+    return oneOffWorkout
+  }
+
+  const recurringWorkout = workouts.find(
+    (workout) => !workout.scheduledDate && workout.scheduledDay === date.getDay(),
+  )
+
+  return recurringWorkout ?? schedule[date.getDay()] ?? null
+}
+
 export function WeeklyCalendar({ recentLogs, schedule, showHero = true, workouts }: WeeklyCalendarProps) {
   const [weekOffset, setWeekOffset] = useState(0)
   const [copied, setCopied] = useState(false)
+  const [optimisticScheduleByDate, setOptimisticScheduleByDate] = useState<Record<string, Workout | null>>({})
+  const [visibleWorkouts, setVisibleWorkouts] = useState(workouts)
+
+  useEffect(() => {
+    setOptimisticScheduleByDate({})
+    setVisibleWorkouts(workouts)
+  }, [schedule, workouts])
 
   const weekStart = startOfWeek(addDays(new Date(), weekOffset * 7), { weekStartsOn: 1 })
+
+  const handleWorkoutSaved = (workout: Workout, previousWorkout?: Workout, referenceDate?: Date) => {
+    const nextVisibleWorkouts = [...visibleWorkouts.filter((currentWorkout) => currentWorkout.id !== workout.id), workout]
+
+    setVisibleWorkouts(nextVisibleWorkouts)
+
+    setOptimisticScheduleByDate((currentOverrides) => {
+      const nextOverrides = { ...currentOverrides }
+      const referenceWeekStart = startOfWeek(referenceDate ?? weekStart, { weekStartsOn: 1 })
+
+      if (previousWorkout?.scheduledDate || previousWorkout?.scheduledDay != null) {
+        const previousDateKey = previousWorkout.scheduledDate
+          ? getDateKey(previousWorkout.scheduledDate)
+          : getDateKey(getWeekDateForScheduledDay(referenceWeekStart, previousWorkout.scheduledDay as number))
+
+        if (
+          nextOverrides[previousDateKey]?.id === previousWorkout.id ||
+          (previousWorkout.scheduledDate
+            ? getScheduledWorkoutForDate(visibleWorkouts, schedule, previousWorkout.scheduledDate)?.id === previousWorkout.id
+            : getScheduledWorkoutForDate(
+                visibleWorkouts,
+                schedule,
+                getWeekDateForScheduledDay(referenceWeekStart, previousWorkout.scheduledDay as number),
+              )?.id === previousWorkout.id)
+        ) {
+          nextOverrides[previousDateKey] = null
+        }
+      }
+
+      if (workout.scheduledDate || workout.scheduledDay != null) {
+        const targetDate = workout.scheduledDate ?? getWeekDateForScheduledDay(referenceWeekStart, workout.scheduledDay as number)
+        const targetDateKey = getDateKey(targetDate)
+        const scheduledWorkout = nextOverrides[targetDateKey] ?? getScheduledWorkoutForDate(nextVisibleWorkouts, schedule, targetDate)
+
+        if (
+          !scheduledWorkout ||
+          scheduledWorkout.id === workout.id ||
+          previousWorkout?.id === scheduledWorkout.id ||
+          (previousWorkout?.scheduledDate && workout.scheduledDate && isSameDay(previousWorkout.scheduledDate, workout.scheduledDate)) ||
+          previousWorkout?.scheduledDay === workout.scheduledDay
+        ) {
+          nextOverrides[targetDateKey] = workout
+        }
+      }
+
+      return nextOverrides
+    })
+  }
+
+  const handleWorkoutDeleted = (workout: Workout, referenceDate?: Date) => {
+    const nextVisibleWorkouts = visibleWorkouts.filter((currentWorkout) => currentWorkout.id !== workout.id)
+
+    setVisibleWorkouts(nextVisibleWorkouts)
+
+    if (!workout.scheduledDate && workout.scheduledDay == null) {
+      return
+    }
+
+    const referenceWeekStart = startOfWeek(referenceDate ?? weekStart, { weekStartsOn: 1 })
+    const scheduledDate = workout.scheduledDate ?? getWeekDateForScheduledDay(referenceWeekStart, workout.scheduledDay as number)
+    const scheduledDateKey = getDateKey(scheduledDate)
+    const fallbackWorkout = getScheduledWorkoutForDate(nextVisibleWorkouts, schedule, scheduledDate)
+
+    setOptimisticScheduleByDate((currentOverrides) => {
+      const nextOverrides = { ...currentOverrides }
+
+      if (fallbackWorkout) {
+        delete nextOverrides[scheduledDateKey]
+      } else {
+        nextOverrides[scheduledDateKey] = null
+      }
+
+      return nextOverrides
+    })
+  }
+
   const entries: ScheduleEntry[] = DISPLAY_WEEKDAY_ORDER.map((weekday, displayIndex) => {
     const date = addDays(weekStart, displayIndex)
-    const workout = schedule[weekday] ?? null
+    const dateKey = getDateKey(date)
+    const baseWorkout = getScheduledWorkoutForDate(visibleWorkouts, schedule, date)
+    const workout = Object.hasOwn(optimisticScheduleByDate, dateKey)
+      ? optimisticScheduleByDate[dateKey] ?? null
+      : baseWorkout
     const log = getLogForDate(recentLogs, date, workout)
 
     return {
@@ -113,7 +222,8 @@ export function WeeklyCalendar({ recentLogs, schedule, showHero = true, workouts
     }
   })
 
-  const templateWorkouts = workouts
+  const templateWorkouts = visibleWorkouts
+    .filter((workout) => !workout.scheduledDate)
     .slice()
     .sort((left, right) => Number(Boolean(right.isPersonal)) - Number(Boolean(left.isPersonal)))
   const scheduledCount = entries.filter((entry) => entry.workout).length
@@ -149,7 +259,9 @@ export function WeeklyCalendar({ recentLogs, schedule, showHero = true, workouts
         {copied ? "Copied" : "Copy Week"}
       </Button>
       <CreateWorkoutDialog
-        workoutTemplates={workouts}
+        onWorkoutSaved={(workout, previousWorkout) => handleWorkoutSaved(workout, previousWorkout)}
+        refreshOnSuccess={false}
+        workoutTemplates={visibleWorkouts}
         trigger={
           <Button className="gap-2">
             <Plus className="h-4 w-4" />
@@ -254,8 +366,10 @@ export function WeeklyCalendar({ recentLogs, schedule, showHero = true, workouts
                 </Link>
               ) : (
                 <CreateWorkoutDialog
-                  defaultScheduledDay={entry.weekday}
-                  workoutTemplates={workouts}
+                  defaultScheduledDate={entry.date}
+                  onWorkoutSaved={(workout, previousWorkout) => handleWorkoutSaved(workout, previousWorkout, entry.date)}
+                  refreshOnSuccess={false}
+                  workoutTemplates={visibleWorkouts}
                   trigger={
                     <button
                       type="button"
@@ -296,7 +410,7 @@ export function WeeklyCalendar({ recentLogs, schedule, showHero = true, workouts
                   <Link
                     href={`/workout/${entry.workout.id}/start`}
                     className={cn(
-                      "block h-[78px] w-full overflow-hidden rounded-[18px] px-4 py-3 transition-all hover:border-primary/30",
+                      "block h-[90px] w-full overflow-hidden rounded-[18px] px-4 py-3 transition-all hover:border-primary/30",
                       entry.isCompleted ? "border-primary/20 bg-primary/10" : "border-transparent bg-primary/10",
                     )}
                   >
@@ -312,6 +426,11 @@ export function WeeklyCalendar({ recentLogs, schedule, showHero = true, workouts
                     {entry.workout.isPersonal ? (
                       <>
                         <CreateWorkoutDialog
+                          defaultScheduledDate={entry.date}
+                          onWorkoutSaved={(workout, previousWorkout) =>
+                            handleWorkoutSaved(workout, previousWorkout, entry.date)
+                          }
+                          refreshOnSuccess={false}
                           workoutToEdit={entry.workout}
                           trigger={
                             <button
@@ -323,14 +442,22 @@ export function WeeklyCalendar({ recentLogs, schedule, showHero = true, workouts
                             </button>
                           }
                         />
-                        <DeleteWorkoutButton
-                          workoutId={entry.workout.id}
-                          variant="ghost"
-                          size="icon-sm"
-                          className="h-8 w-8 rounded-full px-0 text-destructive hover:bg-destructive/10"
-                          confirmTitle="Delete this workout?"
-                          confirmDescription="This will remove the personal workout from your schedule for this day."
-                        />
+                        {entry.workout.scheduledDate ? (
+                          <DeleteWorkoutButton
+                            onDeleted={() => {
+                              if (entry.workout) {
+                                handleWorkoutDeleted(entry.workout, entry.date)
+                              }
+                            }}
+                            refreshOnSuccess={false}
+                            workoutId={entry.workout.id}
+                            variant="ghost"
+                            size="icon-sm"
+                            className="h-8 w-8 rounded-full px-0 text-destructive hover:bg-destructive/10"
+                            confirmTitle="Delete this workout?"
+                            confirmDescription="This will remove the workout from this specific date."
+                          />
+                        ) : null}
                       </>
                     ) : null}
                   </div>
@@ -338,12 +465,14 @@ export function WeeklyCalendar({ recentLogs, schedule, showHero = true, workouts
               ) : (
                 <div className="mt-5 flex flex-1 flex-col">
                   <CreateWorkoutDialog
-                    defaultScheduledDay={entry.weekday}
-                    workoutTemplates={workouts}
+                    defaultScheduledDate={entry.date}
+                    onWorkoutSaved={(workout, previousWorkout) => handleWorkoutSaved(workout, previousWorkout, entry.date)}
+                    refreshOnSuccess={false}
+                    workoutTemplates={visibleWorkouts}
                     trigger={
                       <button
                         type="button"
-                        className="flex h-[78px] w-full flex-col items-center justify-center rounded-[18px] border border-dashed border-border bg-background/40 px-4 text-center transition-all hover:border-primary/30 hover:bg-background/70"
+                        className="flex h-[90px] w-full flex-col items-center justify-center rounded-[18px] border border-dashed border-border bg-background/40 px-4 text-center transition-all hover:border-primary/30 hover:bg-background/70"
                       >
                         <span className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
                           <Plus className="h-5 w-5" />

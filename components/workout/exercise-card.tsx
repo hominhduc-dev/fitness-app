@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { formatExerciseVariationLabel } from "@/lib/exercise-display"
 import { cn } from "@/lib/utils"
 import type { WorkoutExercise, ExerciseSet } from "@/lib/types"
+import { formatRepTarget } from "@/lib/workout-reps"
 
 const setTableGridClass =
   "grid grid-cols-[2.5rem_minmax(3.75rem,0.95fr)_repeat(4,minmax(0,1fr))] gap-2 sm:grid-cols-12"
@@ -31,6 +32,12 @@ export function ExerciseCard({
   const completedSets = exercise.sets.filter((s) => s.completed).length
   const weightUnitLabel = weightUnit === "lbs" ? "lbs" : "kg"
   const firstSetWeight = exercise.sets[0] ? draftWeightsBySetId[exercise.sets[0].id]?.trim() || exercise.sets[0].weight?.toString() : undefined
+  const targetRepsLabel = exercise.sets[0]
+    ? formatRepTarget({
+        reps: exercise.sets[0].targetReps,
+        repsMin: exercise.sets[0].targetRepsMin,
+      })
+    : "?"
 
   useEffect(() => {
     setDraftWeightsBySetId(
@@ -65,7 +72,7 @@ export function ExerciseCard({
                 })}
               </p>
             <p className="text-sm text-muted-foreground">
-              {completedSets}/{exercise.sets.length} sets · {exercise.exercise.muscleGroup}
+              {completedSets}/{exercise.sets.length} sets · {exercise.exercise.muscleGroup} · {targetRepsLabel} reps
             </p>
           </div>
         </div>
@@ -166,6 +173,10 @@ function SetRow({ set, setIndex, weightUnitLabel, placeholderWeight, onWeightCha
   const [reps, setReps] = useState(set.actualReps?.toString() || set.targetReps.toString())
   const [rir, setRir] = useState(set.rir?.toString() || "2")
   const [completed, setCompleted] = useState(set.completed)
+  const targetRepsLabel = formatRepTarget({
+    reps: set.targetReps,
+    repsMin: set.targetRepsMin,
+  })
 
   useEffect(() => {
     setWeight(set.weight?.toString() || "")
@@ -223,6 +234,8 @@ function SetRow({ set, setIndex, weightUnitLabel, placeholderWeight, onWeightCha
           type="number"
           value={reps}
           onChange={(e) => setReps(e.target.value)}
+          aria-label={`Reps (target ${targetRepsLabel})`}
+          title={`Target ${targetRepsLabel} reps`}
           className="h-9 w-full min-w-0 text-center bg-background"
         />
       </div>

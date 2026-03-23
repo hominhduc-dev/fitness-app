@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { format } from "date-fns"
 import {
   closestCenter,
   DndContext,
@@ -44,6 +45,7 @@ import { formatExerciseVariationLabel } from "@/lib/exercise-display"
 import { createWorkout, fetchExercises, updateWorkout } from "@/lib/fitness/api"
 import type { ExerciseVariationOption, Workout } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { formatRepTarget, parseRepTargetText } from "@/lib/workout-reps"
 
 type WorkoutExerciseDraft = {
   variationId: string
@@ -57,6 +59,9 @@ type DialogMode = "create" | "template"
 
 type CreateWorkoutDialogProps = {
   defaultScheduledDay?: number
+  defaultScheduledDate?: Date
+  onWorkoutSaved?: (workout: Workout, previousWorkout?: Workout) => void
+  refreshOnSuccess?: boolean
   trigger?: React.ReactNode
   workoutTemplates?: Workout[]
   workoutToEdit?: Workout
@@ -94,7 +99,10 @@ function createExerciseDraftFromWorkout(exercise: Workout["exercises"][number]):
   return {
     variationId: exercise.variation.id,
     id: createDraftId(),
-    reps: String(Math.max(1, exercise.sets[0]?.targetReps ?? 1)),
+    reps: formatRepTarget({
+      reps: Math.max(1, exercise.sets[0]?.targetReps ?? 1),
+      repsMin: exercise.sets[0]?.targetRepsMin,
+    }),
     sets: String(Math.max(1, exercise.sets.length)),
     weight: exercise.sets[0]?.weight != null ? String(exercise.sets[0].weight) : "",
   }
@@ -119,7 +127,7 @@ function getExercisePreview(workout: Workout) {
 
 function sortWorkoutTemplates(workouts: Workout[]) {
   return workouts
-    .filter((workout) => workout.exercises.length > 0)
+    .filter((workout) => workout.exercises.length > 0 && !workout.scheduledDate)
     .slice()
     .sort((left, right) => {
       const personalDelta = Number(Boolean(right.isPersonal)) - Number(Boolean(left.isPersonal))
@@ -229,10 +237,11 @@ function SortableExerciseRow({
                 </span>
                 <Input
                   id={`${row.id}-reps`}
-                  type="number"
-                  min={1}
+                  type="text"
+                  inputMode="numeric"
                   value={row.reps}
                   onChange={(event) => onUpdate({ reps: event.target.value })}
+                  placeholder="8-12"
                   className="h-5 w-full border-0 bg-transparent px-0 text-center text-sm font-semibold shadow-none focus-visible:border-transparent focus-visible:ring-0"
                 />
               </div>
@@ -277,6 +286,9 @@ function SortableExerciseRow({
 
 export function CreateWorkoutDialog({
   defaultScheduledDay,
+  defaultScheduledDate,
+  onWorkoutSaved,
+  refreshOnSuccess = true,
   trigger,
   workoutTemplates = [],
   workoutToEdit,
@@ -307,8 +319,13 @@ export function CreateWorkoutDialog({
   )
   const hasTemplateOptions = templateOptions.length > 0
   const shouldLockExerciseListHeight = isMobileViewport ? exerciseRows.length >= 2 : exerciseRows.length >= 3
-  const isScheduledDayLocked = !isEditing && typeof defaultScheduledDay === "number"
-  const selectedDayLabel = getDayLabel(scheduledDay)
+  const lockedScheduledDate = workoutToEdit?.scheduledDate ?? defaultScheduledDate
+  const isScheduledDateLocked = Boolean(lockedScheduledDate)
+  const isScheduledDayLocked = !isScheduledDateLocked && !isEditing && typeof defaultScheduledDay === "number"
+  const isScheduleLocked = isScheduledDateLocked || isScheduledDayLocked
+  const selectedScheduleLabel = lockedScheduledDate
+    ? format(lockedScheduledDate, "EEE, MMM d")
+    : getDayLabel(scheduledDay)
   const triggerContent = trigger ?? (
     <Button className="gap-2 bg-primary hover:bg-primary/90" disabled={authLoading}>
       <Plus className="h-4 w-4" />
@@ -317,7 +334,7 @@ export function CreateWorkoutDialog({
   )
 
   const getDefaultMode = () => {
-    if (hasTemplateOptions && isScheduledDayLocked) {
+    if (hasTemplateOptions && isScheduleLocked) {
       return "template" as const
     }
 
@@ -334,7 +351,7 @@ export function CreateWorkoutDialog({
             : [createExerciseDraft(defaultVariationId)],
         name: workoutToEdit.name,
         notes: workoutToEdit.notes ?? "",
-        scheduledDay: String(workoutToEdit.scheduledDay ?? defaultScheduledDay ?? new Date().getDay()),
+        scheduledDay: String(workoutToEdit.scheduledDay ?? defaultScheduledDay ?? lockedScheduledDate?.getDay() ?? new Date().getDay()),
       }
     }
 
@@ -343,7 +360,7 @@ export function CreateWorkoutDialog({
       exerciseRows: [createExerciseDraft(defaultVariationId)],
       name: "",
       notes: "",
-      scheduledDay: String(defaultScheduledDay ?? new Date().getDay()),
+      scheduledDay: String(defaultScheduledDay ?? lockedScheduledDate?.getDay() ?? new Date().getDay()),
     }
   }
 
@@ -382,7 +399,7 @@ export function CreateWorkoutDialog({
     if (!open) {
       resetForm()
     }
-  }, [defaultScheduledDay, exerciseOptions.length, open, workoutToEdit])
+  }, [defaultScheduledDay, defaultScheduledDate, exerciseOptions.length, open, workoutToEdit])
 
   useEffect(() => {
     if (!open) {
@@ -390,7 +407,7 @@ export function CreateWorkoutDialog({
     }
 
     setMode(getDefaultMode())
-  }, [defaultScheduledDay, hasTemplateOptions, isScheduledDayLocked, open])
+  }, [defaultScheduledDate, defaultScheduledDay, hasTemplateOptions, isScheduleLocked, open])
 
   useEffect(() => {
     if (!open || !session?.access_token || exerciseOptions.length > 0 || (!isEditing && mode !== "create")) {
@@ -527,21 +544,40 @@ export function CreateWorkoutDialog({
       return
     }
 
-    const normalizedExercises = exerciseRows
-      .filter((row) => row.variationId)
-      .map((row) => {
-        const parsedWeight = Number(row.weight)
+    let normalizedExercises: Array<{
+      repsMin?: number
+      variationId: string
+      reps: number
+      sets: number
+      weight?: number
+    }>
 
-        return {
-          variationId: row.variationId,
-          reps: Math.max(1, Number(row.reps) || 1),
-          sets: Math.max(1, Number(row.sets) || 1),
-          weight:
-            row.weight.trim() && Number.isFinite(parsedWeight)
-              ? Math.max(0, parsedWeight)
-              : undefined,
-        }
-      })
+    try {
+      normalizedExercises = exerciseRows
+        .filter((row) => row.variationId)
+        .map((row, index) => {
+          const parsedWeight = Number(row.weight)
+          const repTarget = parseRepTargetText(row.reps)
+
+          if (!repTarget) {
+            throw new Error(`Reps không hợp lệ ở bài tập ${index + 1}. Dùng dạng 8-12 hoặc 10.`)
+          }
+
+          return {
+            reps: repTarget.reps,
+            repsMin: repTarget.repsMin,
+            variationId: row.variationId,
+            sets: Math.max(1, Number(row.sets) || 1),
+            weight:
+              row.weight.trim() && Number.isFinite(parsedWeight)
+                ? Math.max(0, parsedWeight)
+                : undefined,
+          }
+        })
+    } catch (buildError) {
+      setError(buildError instanceof Error ? buildError.message : "Reps không hợp lệ.")
+      return
+    }
 
     if (!name.trim()) {
       setError("Workout name is required.")
@@ -563,17 +599,26 @@ export function CreateWorkoutDialog({
         exercises: normalizedExercises,
         name: name.trim(),
         notes: notes.trim() || undefined,
-        scheduledDay: Number(scheduledDay),
+        scheduledDate: lockedScheduledDate ? format(lockedScheduledDate, "yyyy-MM-dd") : undefined,
+        scheduledDay: lockedScheduledDate ? undefined : Number(scheduledDay),
       }
 
-      if (isEditing && workoutToEdit) {
-        await updateWorkout(session.access_token, workoutToEdit.id, payload)
+      let savedWorkout: Workout
+      const shouldCreateOneOffOverride = Boolean(lockedScheduledDate && isEditing && workoutToEdit && !workoutToEdit.scheduledDate)
+
+      if (shouldCreateOneOffOverride) {
+        savedWorkout = await createWorkout(session.access_token, payload)
+      } else if (isEditing && workoutToEdit) {
+        savedWorkout = await updateWorkout(session.access_token, workoutToEdit.id, payload)
       } else {
-        await createWorkout(session.access_token, payload)
+        savedWorkout = await createWorkout(session.access_token, payload)
       }
 
+      onWorkoutSaved?.(savedWorkout, workoutToEdit)
       handleOpenChange(false)
-      router.refresh()
+      if (refreshOnSuccess) {
+        router.refresh()
+      }
     } catch (saveError) {
       setError(
         saveError instanceof Error
@@ -602,9 +647,10 @@ export function CreateWorkoutDialog({
     setError(null)
 
     try {
-      await createWorkout(session.access_token, {
+      const createdWorkout = await createWorkout(session.access_token, {
         duration: template.duration,
         exercises: template.exercises.map((exercise) => ({
+          repsMin: exercise.sets[0]?.targetRepsMin,
           variationId: exercise.variation.id,
           reps: Math.max(1, exercise.sets[0]?.targetReps ?? 1),
           sets: Math.max(1, exercise.sets.length),
@@ -612,11 +658,15 @@ export function CreateWorkoutDialog({
         })),
         name: template.name,
         notes: template.notes,
-        scheduledDay: Number(scheduledDay),
+        scheduledDate: lockedScheduledDate ? format(lockedScheduledDate, "yyyy-MM-dd") : undefined,
+        scheduledDay: lockedScheduledDate ? undefined : Number(scheduledDay),
       })
 
+      onWorkoutSaved?.(createdWorkout)
       handleOpenChange(false)
-      router.refresh()
+      if (refreshOnSuccess) {
+        router.refresh()
+      }
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to add this template.")
     } finally {
@@ -625,9 +675,11 @@ export function CreateWorkoutDialog({
     }
   }
 
-  const dialogTitle = isEditing ? "Edit Workout" : isScheduledDayLocked ? `Add Workout to ${selectedDayLabel}` : "Add Workout"
+  const dialogTitle = isEditing ? "Edit Workout" : isScheduleLocked ? `Add Workout to ${selectedScheduleLabel}` : "Add Workout"
   const dialogDescription = isEditing
-    ? "Update the workout details and keep this session aligned with your schedule."
+    ? lockedScheduledDate && workoutToEdit && !workoutToEdit.scheduledDate
+      ? "Save changes for this date only. Your recurring workout stays unchanged for other weeks."
+      : "Update the workout details and keep this session aligned with your schedule."
     : hasTemplateOptions
       ? "Create a fresh workout or drop in one of your saved templates."
       : "Build a personal workout and add it straight to your schedule without waiting for a coach assignment."
@@ -833,7 +885,14 @@ export function CreateWorkoutDialog({
             </div>
           ) : null}
 
-          {!isScheduledDayLocked ? (
+          {isScheduledDateLocked ? (
+            <div className="space-y-2">
+              <Label>Scheduled date</Label>
+              <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm font-medium text-foreground">
+                {selectedScheduleLabel}
+              </div>
+            </div>
+          ) : !isScheduledDayLocked ? (
             <div className="space-y-2">
               <Label htmlFor="workout-day">Scheduled day</Label>
               <Select value={scheduledDay} onValueChange={setScheduledDay}>

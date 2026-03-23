@@ -236,6 +236,7 @@ model Workout {
   programId    String?           @db.Uuid
   name         String
   scheduledDay Int?
+  scheduledDate DateTime?        @db.Date
   duration     Int?
   notes        String?
   program      Program?          @relation(fields: [programId], references: [id], onDelete: Cascade)
@@ -245,6 +246,7 @@ model Workout {
   updatedAt    DateTime          @updatedAt
 
   @@index([programId])
+  @@index([scheduledDate])
 }
 
 model WorkoutExercise {
@@ -268,6 +270,7 @@ model ExerciseSet {
   id                String          @id @default(uuid()) @db.Uuid
   workoutExerciseId String          @db.Uuid
   setNumber         Int
+  targetRepsMin     Int?
   targetReps        Int
   actualReps        Int?
   weight            Float?

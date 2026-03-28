@@ -3,6 +3,7 @@ node_modules/
 backend/node_modules/
 backend/dist/
 .env
+.env.docker
 .env.local
 .env.development.local
 .env.test.local
